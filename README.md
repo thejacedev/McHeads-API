@@ -10,8 +10,8 @@ A self-hosted Node.js/Express API for generating Minecraft player head, avatar, 
 ## Quick Start
 
 ```bash
-git clone https://github.com/thejacedev/MCHeadsApiUpdated.git
-cd MCHeadsApiUpdated
+git clone https://github.com/thejacedev/McHeads-API.git
+cd McHeads-API
 npm install
 npm start
 ```
