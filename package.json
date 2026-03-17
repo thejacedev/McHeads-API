@@ -26,7 +26,7 @@
     "helmet": "^7.1.0",
     "jimp": "^0.22.10",
     "sharp": "^0.32.6",
-    "sqlite3": "^5.1.6"
+    "sqlite3": "^6.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
