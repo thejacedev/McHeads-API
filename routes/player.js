@@ -48,7 +48,7 @@ router.get('/player/:input/:size?/:option?', async (req, res) => {
             throw new Error('No skin URL found');
         }
         
-        const bodyBuffer = await createBodyRender(skinUrl, sizeInt);
+        const bodyBuffer = await createBodyRender(skinUrl, sizeInt, option === 'hat');
         
         await saveToCache(cacheKey, bodyBuffer, 'image/png');
         

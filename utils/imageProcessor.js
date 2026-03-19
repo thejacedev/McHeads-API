@@ -25,18 +25,30 @@ const sharp = require('sharp');
 const Jimp = require('jimp');
 const { createCanvas, Image } = require('canvas');
 
-async function createHeadRender(skinUrl, size = 128) {
+async function createHeadRender(skinUrl, size = 128, hat = false) {
     try {
         const skinResponse = await axios.get(skinUrl, { responseType: 'arraybuffer' });
         const skinBuffer = Buffer.from(skinResponse.data);
 
-        const headBuffer = await sharp(skinBuffer)
+        const baseHead = await sharp(skinBuffer)
             .extract({ left: 8, top: 8, width: 8, height: 8 })
             .resize(size, size, { kernel: 'nearest' })
-            .png()
             .toBuffer();
 
-        return headBuffer;
+        let image = sharp(baseHead);
+
+        if (hat) {
+            const hatLayer = await sharp(skinBuffer)
+                .extract({ left: 40, top: 8, width: 8, height: 8 })
+                .resize(size, size, { kernel: 'nearest' })
+                .toBuffer();
+
+            image = image.composite([{ input: hatLayer }]);
+        }
+
+        return await image
+            .png()
+            .toBuffer();
     } catch (error) {
         throw new Error(`Failed to create head render: ${error.message}`);
     }
@@ -66,7 +78,7 @@ async function createAvatarRender(skinUrl, size = 128) {
     }
 }
 
-async function createBodyRender(skinUrl, size = 128) {
+async function createBodyRender(skinUrl, size = 128, hat = false) {
     try {
         const skinResponse = await axios.get(skinUrl, { responseType: 'arraybuffer' });
         const skinBuffer = Buffer.from(skinResponse.data);
@@ -77,15 +89,34 @@ async function createBodyRender(skinUrl, size = 128) {
 
         const body = new Jimp(size, size * 2);
 
+        // Head
         const head = skin.clone().crop(8, 8, 8, 8).resize(size/2, size/2, Jimp.RESIZE_NEAREST_NEIGHBOR);
         body.composite(head, size/4, 0);
 
+        if (hat) {
+            const headOverlay = skin.clone().crop(40, 8, 8, 8).resize(size/2, size/2, Jimp.RESIZE_NEAREST_NEIGHBOR);
+            body.composite(headOverlay, size/4, 0);
+        }
+
+        // Torso
         const torso = skin.clone().crop(20, 20, 8, 12).resize(size/2, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
         body.composite(torso, size/4, size/2);
 
+        if (hat) {
+            const torsoOverlay = skin.clone().crop(20, 36, 8, 12).resize(size/2, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
+            body.composite(torsoOverlay, size/4, size/2);
+        }
+
+        // Left arm
         const leftArm = skin.clone().crop(44, 20, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
         body.composite(leftArm, 0, size/2);
 
+        if (hat) {
+            const leftArmOverlay = skin.clone().crop(44, 36, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
+            body.composite(leftArmOverlay, 0, size/2);
+        }
+
+        // Right arm
         let rightArm;
         if (isNewFormat) {
             rightArm = skin.clone().crop(36, 52, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
@@ -94,9 +125,21 @@ async function createBodyRender(skinUrl, size = 128) {
         }
         body.composite(rightArm, size*3/4, size/2);
 
+        if (hat && isNewFormat) {
+            const rightArmOverlay = skin.clone().crop(52, 52, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
+            body.composite(rightArmOverlay, size*3/4, size/2);
+        }
+
+        // Left leg
         const leftLeg = skin.clone().crop(4, 20, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
         body.composite(leftLeg, size/4, size*5/4);
 
+        if (hat) {
+            const leftLegOverlay = skin.clone().crop(4, 36, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
+            body.composite(leftLegOverlay, size/4, size*5/4);
+        }
+
+        // Right leg
         let rightLeg;
         if (isNewFormat) {
             rightLeg = skin.clone().crop(20, 52, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
@@ -104,6 +147,11 @@ async function createBodyRender(skinUrl, size = 128) {
             rightLeg = leftLeg.clone().flip(true, false);
         }
         body.composite(rightLeg, size/2, size*5/4);
+
+        if (hat && isNewFormat) {
+            const rightLegOverlay = skin.clone().crop(4, 52, 4, 12).resize(size/4, size*3/4, Jimp.RESIZE_NEAREST_NEIGHBOR);
+            body.composite(rightLegOverlay, size/2, size*5/4);
+        }
 
         return await body.getBufferAsync(Jimp.MIME_PNG);
     } catch (error) {
