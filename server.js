@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -32,6 +33,8 @@ app.use(helmet({crossOriginResourcePolicy: { policy: "cross-origin" }}));
 app.use(compression());
 app.use(cors());
 app.use(express.json());
+
+const { initDatabase, closeDatabase } = require('./utils/database');
 
 const mhfRoutes = require('./routes/mhf');
 const playerRoutes = require('./routes/player');
@@ -53,16 +56,20 @@ app.use('/', statsRoutes);
 app.use('/', downloadRoutes);
 app.use('/', healthRoutes);
 
-app.listen(PORT, () => {
-    console.log(`Minecraft Heads API running on port ${PORT}`);
-    console.log(`Health check: http://localhost:${PORT}/health`);
-    console.log(`MHF Heads: http://localhost:${PORT}/minecraft/mhf`);
+initDatabase().then(() => {
+    app.listen(PORT, () => {
+        console.log(`Minecraft Heads API running on port ${PORT}`);
+        console.log(`Health check: http://localhost:${PORT}/health`);
+        console.log(`MHF Heads: http://localhost:${PORT}/minecraft/mhf`);
+    });
+}).catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
 });
 
 process.on('SIGINT', () => {
     console.log('Shutting down gracefully...');
-    const { db } = require('./utils/database');
-    db.close();
+    closeDatabase();
     console.log('Database connection closed.');
     process.exit(0);
 });

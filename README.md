@@ -23,9 +23,10 @@ npm run dev
 
 ## Environment Variables
 
-| Variable | Default | Description                |
-|----------|---------|----------------------------|
-| `PORT`   | `3005`  | Port the server listens on |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3005` | Port the server listens on |
+| `DATABASE_URL` | — | PostgreSQL connection string (uses SQLite if not set) |
 
 Copy `.env.example` to `.env` and fill in your values.
 
