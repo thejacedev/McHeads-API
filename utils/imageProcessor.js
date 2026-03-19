@@ -25,18 +25,30 @@ const sharp = require('sharp');
 const Jimp = require('jimp');
 const { createCanvas, Image } = require('canvas');
 
-async function createHeadRender(skinUrl, size = 128) {
+async function createHeadRender(skinUrl, size = 128, hat = false) {
     try {
         const skinResponse = await axios.get(skinUrl, { responseType: 'arraybuffer' });
         const skinBuffer = Buffer.from(skinResponse.data);
 
-        const headBuffer = await sharp(skinBuffer)
+        const baseHead = await sharp(skinBuffer)
             .extract({ left: 8, top: 8, width: 8, height: 8 })
             .resize(size, size, { kernel: 'nearest' })
-            .png()
             .toBuffer();
 
-        return headBuffer;
+        let image = sharp(baseHead);
+
+        if (hat) {
+            const hatLayer = await sharp(skinBuffer)
+                .extract({ left: 40, top: 8, width: 8, height: 8 })
+                .resize(size, size, { kernel: 'nearest' })
+                .toBuffer();
+
+            image = image.composite([{ input: hatLayer }]);
+        }
+
+        return await image
+            .png()
+            .toBuffer();
     } catch (error) {
         throw new Error(`Failed to create head render: ${error.message}`);
     }

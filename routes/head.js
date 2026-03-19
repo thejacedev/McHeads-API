@@ -47,8 +47,8 @@ router.get('/head/:input/:size?/:option?', async (req, res) => {
         if (!skinUrl) {
             throw new Error('No skin URL found');
         }
-        
-        const headBuffer = await createHeadRender(skinUrl, sizeInt);
+
+        const headBuffer = await createHeadRender(skinUrl, sizeInt, option === 'hat');
         
         await saveToCache(cacheKey, headBuffer, 'image/png');
         
