@@ -2,10 +2,10 @@
 
 A self-hosted Node.js/Express API for generating Minecraft player head, avatar, and body renders. Supports both **Java Edition** (Mojang API) and **Bedrock Edition** (GeyserMC API) with automatic edition detection and 1-hour SQLite caching.
 
-| | | | | |
-|:---:|:---:|:---:|:---:|:---:|
-| ![head](https://api.mcheads.org/head/JaceDev/80) | ![avatar left](https://api.mcheads.org/avatar/JaceDev/left/80) | ![avatar right](https://api.mcheads.org/avatar/JaceDev/right/80) | ![player](https://api.mcheads.org/player/JaceDev/80) | ![head iso](https://api.mcheads.org/ioshead/JaceDev/left) |
-| `/head` | `/avatar left` | `/avatar right` | `/player` | `/ioshead` |
+| | | | | | |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| ![head](https://api.mcheads.org/head/JaceDev/80) | ![hat](https://api.mcheads.org/head/JaceDev/80/hat) | ![avatar left](https://api.mcheads.org/avatar/JaceDev/left/80) | ![avatar right](https://api.mcheads.org/avatar/JaceDev/right/80) | ![player](https://api.mcheads.org/player/JaceDev/80) | ![head iso](https://api.mcheads.org/ioshead/JaceDev/left) |
+| `/head` | `/head hat` | `/avatar left` | `/avatar right` | `/player` | `/ioshead` |
 
 ## Quick Start
 
@@ -35,7 +35,8 @@ Copy `.env.example` to `.env` and fill in your values.
 
 | Endpoint | Description |
 |---|---|
-| `GET /head/:input/:size?` | Head render (no hat layer) |
+| `GET /head/:input/:size?` | Head render (base skin only) |
+| `GET /head/:input/:size?/hat` | Head render with hat overlay layer |
 | `GET /avatar/:input/:direction/:size?` | Isometric full body (`left` or `right`) |
 | `GET /player/:input/:size?` | Full body render |
 | `GET /skin/:input` | Raw skin texture PNG |
@@ -78,6 +79,9 @@ curl http://localhost:3005/head/.ExampleGamertag/128
 
 # Bedrock — XUID
 curl http://localhost:3005/avatar/0000123456789/64
+
+# Head with hat overlay
+curl http://localhost:3005/head/Notch/128/hat
 
 # MHF preset head
 curl http://localhost:3005/head/MHF_Creeper/128

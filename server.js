@@ -62,12 +62,7 @@ app.listen(PORT, () => {
 process.on('SIGINT', () => {
     console.log('Shutting down gracefully...');
     const { db } = require('./utils/database');
-    db.close((err) => {
-        if (err) {
-            console.error('Error closing database:', err);
-        } else {
-            console.log('Database connection closed.');
-        }
-        process.exit(0);
-    });
+    db.close();
+    console.log('Database connection closed.');
+    process.exit(0);
 });
