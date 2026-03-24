@@ -28,7 +28,7 @@
     "helmet": "^7.1.0",
     "jimp": "^0.22.10",
     "pg": "^8.20.0",
-    "sharp": "^0.32.6"
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
