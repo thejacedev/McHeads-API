@@ -18,25 +18,29 @@ GET /iosbody/:input/:direction/:option?
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `input` | string | Yes | -- | Player identifier. Accepts a Java username, UUID (with or without dashes), Bedrock XUID (starts with `0000`), or dot-prefixed Bedrock gamertag. |
-| `direction` | string | **Yes** | -- | Viewing direction. Must be exactly `"left"` or `"right"`. **Returns 400 if missing or invalid.** |
-| `option` | string/integer | No | `64` | Size override in pixels. Parsed as an integer; falls back to 64 if not a valid number or if omitted. |
+| `input` | string | Yes | -- | Player identifier. Accepts a Java username, UUID (with or without dashes), Bedrock XUID prefixed with `0000` (e.g., `00002535468413142004`), Floodgate UUID, or dot-prefixed Bedrock gamertag. |
+| `direction` | string | **Yes** | -- | Viewing direction. Must be exactly `"left"` or `"right"`. **Returns 400 if invalid.** |
+| `option` | string/integer | No | `64` | Size in pixels. Missing, non-numeric or non-positive values fall back to 64; other values are clamped to 8–512. |
 
 All parameters automatically have any trailing `.png` suffix stripped before processing.
 
 ### Size Handling
 
-Unlike most endpoints that use a dedicated `size` parameter, these endpoints use the `option` parameter as a size override:
+Unlike most endpoints that use a dedicated `size` parameter, these endpoints take the size as their third (`option`) parameter, parsed with a fallback of 64:
 
 ```javascript
-const size = option ? parseInt(option, 10) || 64 : 64;
+function parseIsometricParams({ direction, option }) {
+    const dir = parseDirection(direction);
+    const sizeInt = parseSize(option, 64);
+    return { dir, sizeInt, cacheParts: [dir, sizeInt] };
+}
 ```
 
-This means the default output size is **64 pixels**, not 128 as with other endpoints.
+This means the default output size is **64 pixels**, not 128 as with other endpoints. As everywhere else, sizes are clamped to 8–512.
 
 ## Direction Is Required
 
-Both endpoints validate the `direction` parameter. If it is missing, omitted, or anything other than `"left"` or `"right"`, a `400 Bad Request` is returned:
+Both endpoints validate the `direction` parameter. If it is anything other than `"left"` or `"right"`, a `400 Bad Request` is returned:
 
 ```json
 {
@@ -44,7 +48,9 @@ Both endpoints validate the `direction` parameter. If it is missing, omitted, or
 }
 ```
 
-- **`right`**: The player/head faces toward the right, showing the left side and top.
+If the direction segment is left out entirely (`/ioshead/Notch`), the URL doesn't match the route and Express answers with its default `404 Not Found` page.
+
+- **`right`**: The player/head faces toward the right, showing the player's right side and the top.
 - **`left`**: A horizontally mirrored version of the right-facing render.
 
 ## /ioshead -- Isometric Head Render
@@ -53,30 +59,26 @@ Renders only the head of the player in an isometric 3D projection. The output sh
 
 ### How It Works
 
-1. **Fetch skin**: Download the skin texture from Mojang or GeyserMC.
+1. **Fetch skin**: The route resolves the skin URL and downloads the skin PNG (or takes it from the in-memory skin cache); `createIsometricHeadRender(skinBuffer, size, direction)` receives the buffer.
 2. **Scale skin**: The skin image is scaled up using nearest-neighbor rendering until the internal block size is large enough for quality output.
-3. **Draw head faces**: Six faces are drawn using canvas affine transforms:
-   - Back-left face: `transform(-1, -0.5, 0, 1, ...)`
-   - Back-right face: `transform(1, -0.5, 0, 1, ...)`
-   - Right side face: `transform(1, -0.5, 0, 1, ...)`
-   - Front face: `transform(1, 0.5, 0, 1, ...)`
-   - Top face: `transform(1, -0.5, 1, 0.5, ...)`
-4. **Draw hat overlay**: The hat overlay layer faces are drawn on top with slightly larger dimensions to simulate the outer layer.
+3. **Draw head faces**: `drawIsometricHead` (shared with the body render) draws 8 faces with canvas affine transforms, back to front: the hat's left and back faces (which show through the hat edges), then the head's front `transform(1, -0.5, 0, 1, ...)`, right side `transform(1, 0.5, 0, 1, ...)` and top `transform(1, -0.5, 1, 0.5, ...)`.
+4. **Draw hat overlay**: The hat's right side, front and top are drawn on top, about 1.1x larger, to simulate the outer layer. The hat layer is always drawn; there is no `hat` option.
 5. **Scale output**: The high-resolution intermediate canvas is scaled down to the requested size using Lanczos3 resampling via Sharp.
 
 ### Skin Coordinates Used
 
-| Face | Source Region (x, y, w, h) | Description |
-|------|---------------------------|-------------|
-| Front | `(blockSize, blockSize, blockSize, blockSize)` | Front of the head |
-| Left | `(0, blockSize, blockSize, blockSize)` | Left side of the head |
-| Right | `(blockSize*2, blockSize, blockSize, blockSize)` | Right side of the head |
-| Top | `(blockSize, 0, blockSize, blockSize)` | Top of the head |
-| Back-left | `(blockSize*6, blockSize, blockSize, blockSize)` | Back-left detail |
-| Back-right | `(blockSize*7, blockSize, blockSize, blockSize)` | Back-right detail |
-| Hat overlay front | `(blockSize*4, blockSize, blockSize, blockSize)` | Hat front overlay |
-| Hat overlay side | `(blockSize*5, blockSize, blockSize, blockSize)` | Hat side overlay |
-| Hat overlay top | `(halfBlock*10, 0, blockSize, blockSize)` | Hat top overlay |
+Positions are in units of `blockSize` (one 8-pixel block of the scaled skin); each region is sampled with a 1-pixel inset.
+
+| Face | Source Region (x, y) | Skin pixels |
+|------|---------------------|-------------|
+| Hat left (behind the head) | `(blockSize*6, blockSize)` | (48, 8) |
+| Hat back (behind the head) | `(blockSize*7, blockSize)` | (56, 8) |
+| Head front | `(blockSize, blockSize)` | (8, 8) |
+| Head right side | `(0, blockSize)` | (0, 8) |
+| Head top | `(blockSize, 0)` | (8, 0) |
+| Hat right side | `(blockSize*4, blockSize)` | (32, 8) |
+| Hat front | `(blockSize*5, blockSize)` | (40, 8) |
+| Hat top | `(halfBlock*10, 0)` | (40, 0) |
 
 ### Output Dimensions
 
@@ -111,9 +113,20 @@ curl -o ioshead.png https://your-domain.com/ioshead/Notch.png/right/128.png
 HTTP/1.1 400 Bad Request
 {"error": "Direction must be \"left\" or \"right\""}
 
+HTTP/1.1 400 Bad Request
+{"error": "Invalid player identifier"}
+
+HTTP/1.1 404 Not Found
+{"error": "Player not found"}
+
+HTTP/1.1 502 Bad Gateway
+{"error": "Failed to render iOS head"}
+
 HTTP/1.1 500 Internal Server Error
 {"error": "Failed to render iOS head"}
 ```
+
+502 means Mojang, GeyserMC or the texture server failed or timed out; 500 covers any other failure.
 
 ---
 
@@ -126,21 +139,20 @@ Renders the full body of the player in an isometric 3D projection. This uses the
 The rendering pipeline is identical to the `/avatar` endpoint. See the [Avatar documentation](avatar.md) for full details on the isometric body rendering process. In summary:
 
 1. Fetch and scale the skin texture.
-2. Detect legacy (64x32) vs. modern (64x64) format.
-3. Draw each visible face of each body part (legs, arms, torso, head) using canvas affine transforms in back-to-front order.
+2. Detect legacy (64x32) vs. modern (64x64) format. Legacy skins only store the right limbs, so the left arm and left leg are mirrored from them.
+3. Draw each visible face of each body part (legs, arms, torso, head) using canvas affine transforms in back-to-front order. Slim-model modern skins get 3px-wide arms.
 4. Draw overlay layers for modern skins.
 5. Scale the final output to the requested size using Lanczos3 resampling.
 
 ### Body Parts Rendered
 
-The isometric body render draws all body parts in this order (back-to-front):
+The isometric body render draws all body parts in this order (back-to-front, described for a right-facing render):
 
-1. Back leg (far side)
-2. Back arm (far side, with overlay if modern)
-3. Front leg (near side, with overlay if modern)
-4. Torso (front face + side face, with overlay if modern)
-5. Front arm (near side, with overlay if modern)
-6. Head (all visible faces + hat overlay)
+1. Legs: right leg front, left leg front (mirrored from the right leg on legacy skins), right leg side, with leg overlays if modern
+2. Far (left) arm: front and top (mirrored from the right arm on legacy skins), with overlay if modern
+3. Torso (front face + side face, with overlay if modern)
+4. Near (right) arm: outer side, front and top, with overlay if modern
+5. Head (all visible faces + hat overlay)
 
 ### Output Dimensions
 
@@ -178,6 +190,15 @@ curl -o iosbody.png https://your-domain.com/iosbody/Notch.png/right/128.png
 HTTP/1.1 400 Bad Request
 {"error": "Direction must be \"left\" or \"right\""}
 
+HTTP/1.1 400 Bad Request
+{"error": "Invalid player identifier"}
+
+HTTP/1.1 404 Not Found
+{"error": "Player not found"}
+
+HTTP/1.1 502 Bad Gateway
+{"error": "Failed to render iOS body"}
+
 HTTP/1.1 500 Internal Server Error
 {"error": "Failed to render iOS body"}
 ```
@@ -189,9 +210,11 @@ HTTP/1.1 500 Internal Server Error
 Both endpoints cache responses for 1 hour. Cache key formats:
 
 ```
-ioshead_{input}_{direction}_{option|default}
-iosbody_{input}_{direction}_{option|default}
+ioshead:{playerId}:{direction}:{size}
+iosbody:{playerId}:{direction}:{size}
 ```
+
+The `playerId` is normalized and the size is the parsed value, so `/ioshead/Notch/right` and `/ioshead/notch/right/64` share the key `ioshead:name:notch:right:64`. Responses carry `Cache-Control: public, max-age=3600`.
 
 ## URL Patterns
 
@@ -204,6 +227,7 @@ iosbody_{input}_{direction}_{option|default}
 /ioshead/Notch.png/right/64.png
 /ioshead/069a79f444e94726a5befca90e38aaf5/left
 /ioshead/.SomePlayer/right/256
+/ioshead/00002535468413142004/left
 ```
 
 ### /iosbody
@@ -215,6 +239,7 @@ iosbody_{input}_{direction}_{option|default}
 /iosbody/Notch.png/left/64.png
 /iosbody/069a79f444e94726a5befca90e38aaf5/right
 /iosbody/.SomePlayer/left/256
+/iosbody/00000000-0000-0000-0009-01febe1ac3f4/right/128
 ```
 
 ## Comparison Table

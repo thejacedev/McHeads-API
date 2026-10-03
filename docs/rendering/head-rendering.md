@@ -8,7 +8,9 @@ title: Head Rendering
 Head rendering is the simplest and fastest render type in the API. It extracts
 the 8x8 face region from a Minecraft skin texture, upscales it to the requested
 size with nearest-neighbor interpolation, and optionally overlays the hat layer.
-The entire pipeline uses **Sharp** -- no Jimp or Canvas involved.
+The entire pipeline uses **Sharp** -- no Canvas involved. The function,
+`createHeadRender(skinBuffer, size, hat)`, receives the skin PNG as a buffer;
+the skin is fetched beforehand by `getSkinImage`.
 
 ---
 
@@ -44,14 +46,22 @@ The `createHeadRender` function extracts exactly this region.
 
 ## Extraction and Resize
 
-Sharp performs the extraction in a single chained call:
+Sharp performs the extraction in a single chained call. A small helper extracts
+any 8x8 face, scaling the coordinates by `width / 64` so HD skins work too:
 
 ```js
-const baseHead = await sharp(skinBuffer)
-    .extract({ left: 8, top: 8, width: 8, height: 8 })
+const { width, height } = await sharp(skinBuffer).metadata();
+const { scale } = skinFormat(width, height);
+const face = (x, y) => sharp(skinBuffer)
+    .extract({ left: x * scale, top: y * scale, width: 8 * scale, height: 8 * scale })
     .resize(size, size, { kernel: 'nearest' })
     .toBuffer();
+
+let image = sharp(await face(8, 8));
 ```
+
+`skinFormat` rejects images that are neither square nor 2:1, which makes the
+request fail with HTTP 500.
 
 Key details:
 
@@ -80,14 +90,17 @@ When the `hat` option is `true`, the API extracts and composites this layer:
 
 ```js
 if (hat) {
-    const hatLayer = await sharp(skinBuffer)
-        .extract({ left: 40, top: 8, width: 8, height: 8 })
-        .resize(size, size, { kernel: 'nearest' })
-        .toBuffer();
-
-    image = image.composite([{ input: hatLayer }]);
+    image = image.composite([{ input: await face(40, 8) }]);
 }
+
+return await image.png().toBuffer();
 ```
+
+The hat region exists in legacy 64x32 skins as well, so `hat` works for every
+skin. Like Minecraft, the renderer ignores a legacy skin's hat layer when the
+right half of the texture (x 32-64, y 0-32) has no transparent pixels, because
+old skins often filled that area with solid colour. `prepareSkin` applies this
+before the hat is composited (see [Skin Format](../reference/skin-format.md)).
 
 The compositing uses Sharp's `composite` method, which alpha-blends the hat
 layer on top of the base head. Transparent pixels in the hat layer show the base
@@ -100,37 +113,12 @@ but this API renders them at 1:1 for simplicity and consistency.
 
 ---
 
-## Avatar Render (Jimp Alternative)
-
-The API also provides `createAvatarRender`, which produces the same visual
-result as a head render with hat but uses **Jimp** instead of Sharp:
-
-```js
-const head = skin.clone()
-    .crop(8, 8, 8, 8)
-    .resize(size, size, Jimp.RESIZE_NEAREST_NEIGHBOR);
-avatar.composite(head, 0, 0);
-
-const hat = skin.clone()
-    .crop(40, 8, 8, 8)
-    .resize(size, size, Jimp.RESIZE_NEAREST_NEIGHBOR);
-avatar.composite(hat, 0, 0);
-```
-
-The avatar render always includes the hat layer (there is no option to disable
-it). The hat extraction is wrapped in a try/catch that silently ignores failures,
-which handles legacy skins that may not have a valid hat region.
-
----
-
 ## Output Format
 
-Both head render functions return a **PNG buffer**. The output dimensions are:
-
-- `createHeadRender`: `size x size` pixels.
-- `createAvatarRender`: `size x size` pixels.
+`createHeadRender` returns a **PNG buffer** of `size x size` pixels.
 
 The default size is **128 px** when no size parameter is provided by the caller.
+The route clamps other sizes to the range 8–512.
 
 ---
 
@@ -139,12 +127,12 @@ The default size is **128 px** when no size parameter is provided by the caller.
 Head renders are cached with the key format:
 
 ```
-head_{input}_{size}_{option}
+head:{playerId}:{size}:{hat|nohat}
 ```
 
 For example:
-- `/head/Notch/256/hat` --> `head_Notch_256_hat`
-- `/head/Notch/128` --> `head_Notch_128_default`
+- `/head/Notch/256/hat` --> `head:name:notch:256:hat`
+- `/head/Notch/128` and `/head/Notch` --> `head:name:notch:128:nohat`
 
 The cache TTL is 1 hour. On a cache hit, the PNG buffer is returned directly
 from the database without touching Sharp, Mojang, or the skin texture at all.
@@ -155,11 +143,12 @@ from the database without touching Sharp, Mojang, or the skin texture at all.
 
 Head rendering is the lightest operation in the API:
 
-- **One HTTP request** to download the skin texture (or zero if the skin URL is
-  already cached by the Mojang profile lookup).
+- **One HTTP request** to download the skin texture (or zero if the skin is
+  already in the in-memory skin cache), after the player lookup (which is itself
+  cached in memory for 10 minutes).
 - **Two Sharp operations** (extract + resize), or three if the hat layer is
   included.
-- **No Canvas or Jimp overhead** -- Sharp's libvips backend is implemented in
+- **No Canvas overhead** -- Sharp's libvips backend is implemented in
   C++ and processes the 8x8 region in under 5 ms on typical hardware.
 - **Small output size** -- an 8x8 region upscaled to 128 px compresses to
   roughly 500 bytes to 3 KB as PNG depending on the skin's color complexity.
@@ -171,10 +160,7 @@ Head rendering is the lightest operation in the API:
 | Route | Function | Hat support |
 | ----- | -------- | ----------- |
 | `GET /head/:input/:size?/:option?` | `createHeadRender` | Yes (pass `hat` as option) |
-| (internal, used by avatar route) | `createAvatarRender` | Always on |
 
-The `/head` route is defined in `routes/head.js`. The avatar render is used
-internally but the `/avatar` route actually calls `createIsometricBodyRender`
-for a 3D isometric body, not the 2D `createAvatarRender`. The
-`createAvatarRender` function exists as a utility for cases where a simple
-2D head-with-hat is needed via Jimp instead of Sharp.
+The `/head` route is defined in `routes/head.js`. (The `/avatar` route renders
+a 3D isometric body with `createIsometricBodyRender`; see
+[Isometric Rendering](isometric-rendering.md).)

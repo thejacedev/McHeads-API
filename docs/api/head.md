@@ -17,16 +17,16 @@ GET /head/:input/:size?/:option?
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `input` | string | Yes | -- | Player identifier. Accepts a Java username (e.g., `Notch`), a Java UUID (with or without dashes), a Bedrock XUID (starts with `0000`), or a dot-prefixed Bedrock gamertag (e.g., `.SomePlayer`). |
-| `size` | integer | No | `128` | Output image width and height in pixels. The rendered image is always square. Any value that cannot be parsed as an integer falls back to 128. |
+| `input` | string | Yes | -- | Player identifier. Accepts a Java username (e.g., `Notch`), a Java UUID (with or without dashes), a Bedrock XUID prefixed with `0000` (e.g., `00002535468413142004`), a Floodgate UUID, or a dot-prefixed Bedrock gamertag (e.g., `.SomePlayer`). |
+| `size` | integer | No | `128` | Output image width and height in pixels. The rendered image is always square. Missing, non-numeric or non-positive values fall back to 128; other values are clamped to 8–512. |
 | `option` | string | No | -- | Pass `"hat"` to composite the hat overlay layer on top of the base face. Any other value or omission skips the overlay. |
 
 All parameters automatically have any trailing `.png` suffix stripped before processing.
 
 ## How It Works
 
-1. The player's skin texture URL is resolved via Mojang (Java) or GeyserMC (Bedrock).
-2. The 8x8 face region is extracted from the skin at pixel coordinates `(8, 8)` using Sharp's `extract` method.
+1. The player's skin texture URL is resolved via Mojang (Java) or GeyserMC (Bedrock), and the skin PNG is downloaded (or taken from the in-memory skin cache).
+2. The 8x8 face region is extracted from the skin at pixel coordinates `(8, 8)` using Sharp's `extract` method. For HD skins wider than 64 pixels, the coordinates and region size are scaled by `width / 64`.
 3. The extracted face is scaled to the requested `size` using nearest-neighbor resampling (`kernel: 'nearest'`).
 4. If the `hat` option is specified, the 8x8 hat overlay region at coordinates `(40, 8)` is extracted, scaled to the same size, and composited on top of the face.
 5. The final image is encoded as PNG and returned.
@@ -45,6 +45,7 @@ These coordinates correspond to the standard Minecraft skin layout. The face is 
 | Header | Value |
 |--------|-------|
 | `Content-Type` | `image/png` |
+| `Cache-Control` | `public, max-age=3600` |
 
 The response body is the raw PNG binary data. The image dimensions are `size x size` pixels.
 
@@ -109,10 +110,10 @@ Both dash-separated and compact UUID formats are accepted.
 ### Bedrock player by XUID
 
 ```bash
-curl -o head_bedrock.png https://your-domain.com/head/0000000000000001/128
+curl -o head_bedrock.png https://your-domain.com/head/00002535468413142004/128
 ```
 
-XUIDs starting with `0000` are routed through the GeyserMC API.
+The XUID (`2535468413142004`) is prefixed with `0000` and routed through the GeyserMC API. A Floodgate UUID such as `00000000-0000-0000-0009-01febe1ac3f4` resolves to the same player.
 
 ### Bedrock player by gamertag
 
@@ -141,17 +142,43 @@ Since the API returns a PNG directly with permissive CORS headers, it works as a
 ### Using an MHF preset
 
 ```bash
-curl -o creeper_head.png https://your-domain.com/head/f4254a8e93e4455b8c8a6b6b6f6d6e6f/128
+curl -o creeper_head.png https://your-domain.com/head/057b1c4713214863a6fe8887f9ec265f/128
 ```
 
 MHF (Minecraft Head Format) UUIDs from the `/minecraft/mhf` endpoint can be used as the `input` parameter to render mob heads.
 
 ## Error Responses
 
-### Player not found or skin fetch failure
+### Invalid player identifier
 
 ```
-HTTP/1.1 500 Internal Server Error
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "Invalid player identifier"
+}
+```
+
+The `input` doesn't match any accepted format (for example a name with spaces or longer than 16 characters).
+
+### Player not found
+
+```
+HTTP/1.1 404 Not Found
+Content-Type: application/json
+
+{
+  "error": "Player not found"
+}
+```
+
+Mojang or GeyserMC reports that the player doesn't exist. Players who exist but have no custom skin are rendered with the default skin instead.
+
+### Upstream failure
+
+```
+HTTP/1.1 502 Bad Gateway
 Content-Type: application/json
 
 {
@@ -159,17 +186,17 @@ Content-Type: application/json
 }
 ```
 
-This occurs when the Mojang/GeyserMC API cannot resolve the player, the player has no skin URL, or the skin image cannot be downloaded.
+Mojang, GeyserMC or the texture server returned an error or didn't answer within 5 seconds. Any other failure (for example a skin that can't be decoded) returns the same message with HTTP 500.
 
 ## Caching
 
 Responses are cached for 1 hour using a database-backed cache. The cache key is constructed as:
 
 ```
-head_{input}_{size|default}_{option|default}
+head:{playerId}:{size}:{hat|nohat}
 ```
 
-For example, `head_Notch_128_hat` or `head_Notch_default_default`. Cached responses are served with the same `Content-Type` and binary data without re-rendering.
+The `playerId` is normalized (`name:<lowercased username>`, `uuid:<32 lowercase hex>`, `xuid:<digits>` or `gt:<lowercased gamertag>`) and the size is the parsed value. For example, `/head/Notch/64/hat` uses `head:name:notch:64:hat`, and `/head/Notch` and `/head/notch/128` both use `head:name:notch:128:nohat`. Cached responses are served with the same headers and binary data without re-rendering.
 
 ## URL Patterns
 
@@ -184,6 +211,7 @@ All of these are valid URL patterns for this endpoint:
 /head/Notch.png/256.png/hat.png
 /head/069a79f444e94726a5befca90e38aaf5
 /head/069a79f4-44e9-4726-a5be-fca90e38aaf5/64/hat
-/head/0000000000000001
+/head/00002535468413142004
+/head/00000000-0000-0000-0009-01febe1ac3f4/64
 /head/.SomePlayer/128
 ```

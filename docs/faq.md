@@ -16,44 +16,52 @@ Both **Java Edition** and **Bedrock Edition** are supported.
 
 - **Java Edition** -- pass a Java username (e.g., `Notch`) or a UUID
   (with or without dashes).
-- **Bedrock Edition** -- prefix a gamertag with a dot (e.g., `.BedrockPlayer`)
-  or pass an XUID that starts with `0000`.
+- **Bedrock Edition** -- prefix a gamertag with a dot (e.g., `.BedrockPlayer`),
+  pass an XUID prefixed with `0000` (e.g., `00002535468413142004`), or pass a
+  Floodgate UUID (e.g., `00000000-0000-0000-0009-01febe1ac3f4`).
 
 The API auto-detects the edition from the input format. Java lookups go through
-the Mojang API; Bedrock lookups go through the GeyserMC API.
+the Mojang API; Bedrock lookups go through the GeyserMC API. Input that matches
+no format is rejected with HTTP 400 `{"error": "Invalid player identifier"}`.
 
 ---
 
 ## What sizes can I request?
 
-You can pass any positive integer as the `size` parameter. There is no hard upper
-limit enforced by the API, but keep in mind:
+Sizes from **8 to 512** pixels. Larger values are clamped to 512 and smaller
+positive values are raised to 8, so `/head/Notch/2000` returns a 512x512 image.
+Keep in mind:
 
 - Minecraft skins are **64x64 pixels** at their native resolution.
 - For 2D head renders (`/head`), the 8x8 face region is upscaled with
-  nearest-neighbor interpolation, so very large sizes (e.g., 2048+) will simply
-  produce large blocky pixels, which is the expected Minecraft aesthetic.
+  nearest-neighbor interpolation, so large sizes simply produce large blocky
+  pixels, which is the expected Minecraft aesthetic.
 - For isometric renders (`/avatar`, `/ioshead`, `/iosbody`), the internal working
   canvas scales to multiples of 120 px, and the final image is resampled with
-  Lanczos3. Sizes up to around 512 px produce good results.
+  Lanczos3.
 - The default size is **128 px** for most endpoints. The isometric iOS endpoints
   default to **64 px**.
 
-If no size is specified, the default is used. If you pass a non-numeric value, it
-falls back to 128.
+If no size is specified, or you pass a non-numeric, zero or negative value, the
+endpoint's default is used.
 
 ---
 
 ## Is there rate limiting?
 
-The API itself does not enforce rate limiting at the application level. However:
+Rate limiting is optional and off by default. A server operator can enable a
+per-IP limit by setting `RATE_LIMIT_PER_MINUTE`; requests over the limit get
+HTTP 429 `{"error": "Too many requests"}` with a `Retry-After` header. In
+addition:
 
 - The **Mojang API** has its own rate limits. If you send too many unique username
   lookups in a short window, Mojang may temporarily block requests. Cached
   responses bypass Mojang entirely, so repeated requests for the same player are
   cheap.
-- If you are self-hosting, consider adding a reverse proxy (nginx, Cloudflare)
-  with rate limiting to protect against abuse.
+- If you are self-hosting behind a reverse proxy, set `TRUST_PROXY` so the
+  built-in limiter sees client IPs instead of the proxy's. The limiter keeps its
+  counts in memory per process; you can also rate limit at the proxy (nginx,
+  Cloudflare).
 - If you are using a hosted instance, check with the operator for their specific
   rate-limiting policy.
 
@@ -61,21 +69,25 @@ The API itself does not enforce rate limiting at the application level. However:
 
 ## How long are images cached?
 
-Rendered images are cached for **1 hour** (3600 seconds). The cache key is built
-from the endpoint name, player input, size, and any options:
+Rendered images are cached for **1 hour** (3600 seconds), and image responses
+send `Cache-Control: public, max-age=3600`. The cache key is built from the
+endpoint name, the normalized player, and the parsed size and options:
 
 ```
-{endpoint}_{input}_{size}_{option}
+{endpoint}:{playerId}:{part}...
 ```
 
 For example, a request to `/head/Notch/256/hat` produces the cache key
-`head_Notch_256_hat`. After one hour, the next request for the same key triggers
-a fresh render and updates the cache.
+`head:name:notch:256:hat`, and `/avatar/Notch/right/128` produces
+`avatar:name:notch:right:128`. Usernames and gamertags are lowercased, so
+`/head/Notch` and `/head/notch` share an entry. After one hour, the next request
+for the same key triggers a fresh render and updates the cache.
 
 The cache lives in either **SQLite** (default, stored in
-`new_minecraft_heads.db`) or **PostgreSQL** (when `DATABASE_URL` is set). Expired
-entries are not automatically purged on a schedule -- they are simply ignored on
-lookup and overwritten on the next request for the same key.
+`new_minecraft_heads.db` or `SQLITE_PATH`) or **PostgreSQL** (when `DATABASE_URL`
+is set). Expired entries are ignored on lookup and deleted at startup and every
+10 minutes. Player lookups (10 minutes) and downloaded skin textures (24 hours)
+are also cached in memory.
 
 ---
 
@@ -100,12 +112,13 @@ Bedrock players are supported through the **GeyserMC API**
 (`api.geysermc.org/v2`). To look up a Bedrock player:
 
 - Prefix the gamertag with a dot: `/head/.BedrockPlayer`
-- Or pass the XUID directly (starts with `0000`): `/head/0000000000012345`
+- Or pass the XUID prefixed with `0000`: `/head/00002535468413142004`
+- Or pass a Floodgate UUID: `/head/00000000-0000-0000-0009-01febe1ac3f4`
 
-If the GeyserMC API returns no skin data for a Bedrock player, the API
-automatically falls back to the default **Steve** skin. If the GeyserMC API is
-unreachable, the same Steve fallback applies. This means Bedrock requests never
-produce a hard error for missing skins.
+If GeyserMC has no skin stored for the player (it returns `{}`), the API uses
+the default (classic Steve) skin. If GeyserMC doesn't know the gamertag, the
+API returns `404 Player not found`. If the GeyserMC API fails or times out, the
+API returns a `502` error, the same as for Java players when Mojang is down.
 
 ---
 
@@ -126,8 +139,8 @@ This returns a JSON object mapping UUIDs to MHF names:
 ```json
 {
   "c06f89064c8a49119c29ea1dbd1aab82": "MHF_Steve",
-  "f7c77d6e15b5a8d3f5b9a8b5c5d2f8a4": "MHF_Alex",
-  "f4254a8e93e4455b8c8a6b6b6f6d6e6f": "MHF_Creeper",
+  "6ab4317889fd490597f60f67d9d76fd9": "MHF_Alex",
+  "057b1c4713214863a6fe8887f9ec265f": "MHF_Creeper",
   ...
 }
 ```
@@ -151,7 +164,7 @@ anything else. Attribution is appreciated but not required.
 Absolutely. Self-hosting is straightforward:
 
 1. Clone the repository.
-2. Run `npm install` to install dependencies (Sharp, Jimp, canvas, etc.).
+2. Run `npm install` to install dependencies (Sharp, canvas, etc.).
 3. Run `npm start` to start the server on port 3005.
 
 By default, the API uses **SQLite** for caching and stats, which requires no
@@ -161,7 +174,8 @@ details.
 
 System requirements for self-hosting:
 
-- **Node.js** 18+ (for native module compatibility with Sharp and canvas).
+- **Node.js** 20+ (`better-sqlite3` 12 requires it; the test suite uses Node's
+  built-in test runner).
 - **Build tools** for native modules: `build-essential`, `libcairo2-dev`,
   `libjpeg-dev`, `libpango1.0-dev`, `libgif-dev`, and `librsvg2-dev` on
   Debian/Ubuntu; equivalent packages on other distributions.
@@ -176,7 +190,8 @@ If the Mojang API is unreachable or returns an error:
 
 - **Cached responses** are still served normally. The 1-hour cache means most
   popular players will continue to work even during an outage.
-- **Uncached requests** will return a `500` error with a JSON body:
+- **Uncached requests** will return a `502` error with the endpoint's generic
+  message once the upstream request fails or times out (after 5 seconds):
   ```json
   { "error": "Failed to render head" }
   ```
@@ -184,8 +199,8 @@ If the Mojang API is unreachable or returns an error:
   the current status. A `red` external API status indicates Mojang is
   unreachable; `yellow` indicates a slow response.
 
-For Bedrock players, if the GeyserMC API is down, the API falls back to the
-Steve skin rather than returning an error.
+For Bedrock players, a GeyserMC outage is handled the same way: cached
+responses still work and uncached requests get a `502`.
 
 ---
 
@@ -227,9 +242,11 @@ GET /head/Notch/128/hat
 GET /player/Notch/128/hat
 ```
 
+For `/player`, `hat` adds every overlay layer on 64x64 skins, but only the head
+overlay on legacy 64x32 skins, which have no other overlay regions.
+
 Isometric renders (`/avatar`, `/ioshead`, `/iosbody`) include overlay layers from
-the skin by default as part of the isometric face composition. They read all six
-cube faces plus their overlay counterparts.
+the skin by default as part of the isometric face composition.
 
 ---
 
@@ -250,8 +267,9 @@ produce identical image output.
 
 ## How are stats tracked?
 
-Every request to a rendering endpoint increments a counter in the database,
-grouped by edition (`java` or `bedrock`). You can query these stats:
+Every image served by a rendering endpoint, including images served from the
+cache, increments a counter in the database, grouped by edition (`java` or
+`bedrock`). Failed requests are not counted. You can query these stats:
 
 | Endpoint | Returns |
 | -------- | ------- |

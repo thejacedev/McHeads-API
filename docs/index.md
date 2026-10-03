@@ -10,8 +10,8 @@ heads, full bodies, isometric 3D avatars, and raw skins on the fly. It supports 
 **Java Edition** and **Bedrock Edition** players, accepts usernames or UUIDs as input,
 and returns optimized PNG images ready to embed in websites, apps, or game overlays.
 
-The server is built on **Express.js** and uses three image-processing libraries --
-Sharp, Jimp, and node-canvas -- to handle everything from pixel-level skin extraction
+The server is built on **Express.js** and uses two image-processing libraries --
+Sharp and node-canvas -- to handle everything from pixel-level skin extraction
 to full isometric 3D projections. Rendered images are cached in either SQLite or
 PostgreSQL so repeat requests are served instantly.
 
@@ -72,15 +72,16 @@ GET /minecraft/mhf
 ## Bedrock Edition
 
 Prefix the player identifier with a dot to request a Bedrock player by gamertag,
-or pass an XUID that starts with `0000`:
+pass an XUID prefixed with `0000`, or pass a Floodgate UUID:
 
 ```
 GET /head/.BedrockPlayer
-GET /head/0000000000012345
+GET /head/00002535468413142004
+GET /head/00000000-0000-0000-0009-01febe1ac3f4
 ```
 
-If a Bedrock player has no custom skin, the API gracefully falls back to the
-default Steve skin.
+If a player (Java or Bedrock) exists but has no custom skin, the API uses the
+default (classic Steve) skin. Unknown players return `404 Player not found`.
 
 ---
 
@@ -88,7 +89,7 @@ default Steve skin.
 
 | Endpoint | Description | Parameters |
 | -------- | ----------- | ---------- |
-| `GET /head/:input/:size?/:option?` | 2D head render | `size` (px), `option` = `hat` |
+| `GET /head/:input/:size?/:option?` | 2D head render | `size` (px, 8–512), `option` = `hat` |
 | `GET /player/:input/:size?/:option?` | 2D full body render | `size` (px), `option` = `hat` |
 | `GET /avatar/:input/:direction/:size?` | Isometric 3D body | `direction` = `left` or `right`, `size` (px) |
 | `GET /ioshead/:input/:direction/:option?` | Isometric 3D head | `direction` = `left` or `right`, `option` = size (px) |
@@ -103,7 +104,8 @@ default Steve skin.
 
 All image endpoints return `Content-Type: image/png`. The `.png` extension is
 optional and automatically stripped from parameters, so `/head/Notch/128.png`
-works the same as `/head/Notch/128`.
+works the same as `/head/Notch/128`. Sizes default to 128 px (64 px for
+`/ioshead` and `/iosbody`) and are clamped to 8–512.
 
 ---
 
@@ -130,6 +132,7 @@ cd MCHeadsApiUpdated
 npm install
 npm start          # production
 npm run dev        # development with nodemon
+npm test           # run the test suite (Node 20+)
 ```
 
 The server starts on port **3005** by default. Set the `PORT` environment

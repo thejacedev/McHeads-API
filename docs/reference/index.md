@@ -28,14 +28,13 @@ Bedrock Edition, including the base64-encoded texture property format.
 ### [Error Codes](error-codes.md)
 
 All error responses the API can return, including HTTP status codes, JSON error
-bodies, and the graceful fallback behavior for Bedrock players with no custom
-skin.
+bodies, and the default skin used for players who have no custom skin.
 
 ### [Environment Variables](environment.md)
 
 Every environment variable the server reads, with defaults and explanations.
-Covers port configuration, database selection (SQLite vs PostgreSQL), and SSL
-settings.
+Covers port configuration, database selection (SQLite vs PostgreSQL), TLS
+settings, rate limiting, and reverse proxy configuration.
 
 ---
 
@@ -48,7 +47,9 @@ settings.
 | Hat overlay region | 8x8 pixels at (40, 8) |
 | Java API | api.mojang.com + sessionserver.mojang.com |
 | Bedrock API | api.geysermc.org/v2 |
-| Cache TTL | 1 hour |
+| Cache TTL | 1 hour (database), plus in-memory player (10 min) and skin (24 h) caches |
+| Size range | 8–512 px (default 128, or 64 for `/ioshead` and `/iosbody`) |
+| Upstream timeout | 5 seconds per request |
 | Default port | 3005 |
 | Default database | SQLite (new_minecraft_heads.db) |
 | Error format | `{ "error": "message" }` |
@@ -60,10 +61,15 @@ settings.
 
 | File | Purpose |
 | ---- | ------- |
-| `utils/minecraft.js` | Mojang and GeyserMC API integration |
+| `utils/minecraft.js` | Player identifier parsing, Mojang and GeyserMC API integration |
 | `utils/imageProcessor.js` | All rendering functions |
+| `utils/imageRoute.js` | Shared handler for image endpoints: cache, render, error responses |
 | `utils/database.js` | Cache, stats, and health log storage |
-| `utils/urlHelpers.js` | Parameter cleaning and size parsing |
+| `utils/memoryCache.js` | In-memory TTL cache for player lookups and skin textures |
+| `utils/http.js` | Shared axios client for upstream requests (5-second timeout) |
+| `utils/rateLimit.js` | Optional per-IP rate limiter |
+| `utils/errors.js` | `HttpError`, an error that maps to an HTTP status |
+| `utils/urlHelpers.js` | Parameter cleaning, size and direction parsing |
 | `utils/mhfHeads.js` | MHF head UUID-to-name mapping |
 | `routes/head.js` | `/head` endpoint |
 | `routes/player.js` | `/player` endpoint |
@@ -74,4 +80,5 @@ settings.
 | `routes/mhf.js` | `/minecraft/mhf` endpoint |
 | `routes/stats.js` | `/allstats`, `/allstatsbedrock`, `/allstatsSorted` |
 | `routes/health.js` | `/health` endpoint |
-| `server.js` | Express app setup, middleware, startup |
+| `app.js` | Express app: middleware and routes |
+| `server.js` | Startup (database init, listen) and graceful shutdown |

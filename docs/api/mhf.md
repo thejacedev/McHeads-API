@@ -19,9 +19,9 @@ This endpoint takes no parameters.
 
 ## How It Works
 
-The MHF heads are a hardcoded dictionary of UUID-to-name mappings stored in `utils/mhfHeads.js`. When the endpoint is called, the entire dictionary is returned as a JSON object. No database queries or external API calls are made beyond recording the request in usage statistics.
+The MHF heads are a hardcoded dictionary of UUID-to-name mappings for the official Mojang `MHF_*` accounts, stored in `utils/mhfHeads.js`. When the endpoint is called, the entire dictionary is returned as a JSON object. No database queries or external API calls are made beyond recording the request in usage statistics.
 
-Each call is tracked as a `java` edition stat with the input `"all"`.
+Each call increments the `java` edition counter.
 
 ## Response
 
@@ -48,29 +48,29 @@ The endpoint returns all 24 MHF presets:
 ```json
 {
   "c06f89064c8a49119c29ea1dbd1aab82": "MHF_Steve",
-  "f7c77d6e15b5a8d3f5b9a8b5c5d2f8a4": "MHF_Alex",
-  "f4254a8e93e4455b8c8a6b6b6f6d6e6f": "MHF_Creeper",
-  "8b6a72138d69fbbd2fea3fa251cabd87": "MHF_Zombie",
-  "c37b40e6c6b3b5f8d5e7f8a9b0c1d2e3": "MHF_Skeleton",
-  "d4c9b2f8e7a6b5c4d3e2f1a0b9c8d7e6": "MHF_Spider",
-  "a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4": "MHF_Enderman",
-  "b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3": "MHF_Slime",
-  "c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2": "MHF_Ghast",
-  "d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1": "MHF_Blaze",
-  "e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0": "MHF_Pig",
-  "f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9": "MHF_Cow",
-  "a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8": "MHF_Chicken",
-  "b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7": "MHF_Sheep",
-  "c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6": "MHF_Squid",
-  "d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5": "MHF_Villager",
-  "e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4": "MHF_Golem",
-  "f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3": "MHF_Ocelot",
-  "a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2": "MHF_Herobrine",
-  "b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1": "MHF_LavaSlime",
-  "c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0": "MHF_Mooshroom",
-  "d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9": "MHF_CaveSpider",
-  "e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8": "MHF_Wolf",
-  "f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7": "MHF_Witch"
+  "6ab4317889fd490597f60f67d9d76fd9": "MHF_Alex",
+  "057b1c4713214863a6fe8887f9ec265f": "MHF_Creeper",
+  "daca2c3d719b41f5b624e4039e6c04bd": "MHF_Zombie",
+  "a3f427a818c549c5a4fb64c6e0e1e0a8": "MHF_Skeleton",
+  "5ad55f3441b64bd29c3218983c635936": "MHF_Spider",
+  "40ffb37212f64678b3f22176bf56dd4b": "MHF_Enderman",
+  "870aba9340e848b389c532ece00d6630": "MHF_Slime",
+  "063085a6797f4785be1a21cd7580f752": "MHF_Ghast",
+  "4c38ed11596a4fd4ab1d26f386c1cbac": "MHF_Blaze",
+  "8b57078bf1bd45df83c4d88d16768fbe": "MHF_Pig",
+  "f159b274c22e4340b7c152abde147713": "MHF_Cow",
+  "92deafa9430742d9b00388601598d6c0": "MHF_Chicken",
+  "dfaad5514e7e45a1a6f7c6fc5ec823ac": "MHF_Sheep",
+  "72e64683e3134c36a408c66b64e94af5": "MHF_Squid",
+  "bd482739767c45dca1f8c33c40530952": "MHF_Villager",
+  "757f90b223444b8d8dac824232e2cece": "MHF_Golem",
+  "1bee9df54f7142a2bf52d97970d3fea3": "MHF_Ocelot",
+  "9586e5ab157a4658ad80b07552a9ca63": "MHF_Herobrine",
+  "0972bdd14b8649fb9ecca353f8491a51": "MHF_LavaSlime",
+  "b48a45553d4c464282338ec6ed7b368c": "MHF_Mooshroom",
+  "cab28771f0cd4fe7b12902c69eba79a5": "MHF_CaveSpider",
+  "8d2d1d6d80344c89bd86809a31fd5193": "MHF_Wolf",
+  "fef85c492fdf47f89132552046243223": "MHF_Witch"
 }
 ```
 
@@ -79,29 +79,29 @@ The endpoint returns all 24 MHF presets:
 | UUID | Name | Category |
 |------|------|----------|
 | `c06f89064c8a49119c29ea1dbd1aab82` | MHF_Steve | Player |
-| `f7c77d6e15b5a8d3f5b9a8b5c5d2f8a4` | MHF_Alex | Player |
-| `f4254a8e93e4455b8c8a6b6b6f6d6e6f` | MHF_Creeper | Hostile Mob |
-| `8b6a72138d69fbbd2fea3fa251cabd87` | MHF_Zombie | Hostile Mob |
-| `c37b40e6c6b3b5f8d5e7f8a9b0c1d2e3` | MHF_Skeleton | Hostile Mob |
-| `d4c9b2f8e7a6b5c4d3e2f1a0b9c8d7e6` | MHF_Spider | Hostile Mob |
-| `a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4` | MHF_Enderman | Hostile Mob |
-| `b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3` | MHF_Slime | Hostile Mob |
-| `c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2` | MHF_Ghast | Hostile Mob |
-| `d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1` | MHF_Blaze | Hostile Mob |
-| `d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9` | MHF_CaveSpider | Hostile Mob |
-| `f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7` | MHF_Witch | Hostile Mob |
-| `b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1` | MHF_LavaSlime | Hostile Mob |
-| `e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0` | MHF_Pig | Passive Mob |
-| `f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9` | MHF_Cow | Passive Mob |
-| `a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8` | MHF_Chicken | Passive Mob |
-| `b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7` | MHF_Sheep | Passive Mob |
-| `c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6` | MHF_Squid | Passive Mob |
-| `d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5` | MHF_Villager | Passive Mob |
-| `e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4` | MHF_Golem | Passive Mob |
-| `f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3` | MHF_Ocelot | Passive Mob |
-| `c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0` | MHF_Mooshroom | Passive Mob |
-| `e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8` | MHF_Wolf | Passive Mob |
-| `a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2` | MHF_Herobrine | Special |
+| `6ab4317889fd490597f60f67d9d76fd9` | MHF_Alex | Player |
+| `057b1c4713214863a6fe8887f9ec265f` | MHF_Creeper | Hostile Mob |
+| `daca2c3d719b41f5b624e4039e6c04bd` | MHF_Zombie | Hostile Mob |
+| `a3f427a818c549c5a4fb64c6e0e1e0a8` | MHF_Skeleton | Hostile Mob |
+| `5ad55f3441b64bd29c3218983c635936` | MHF_Spider | Hostile Mob |
+| `40ffb37212f64678b3f22176bf56dd4b` | MHF_Enderman | Hostile Mob |
+| `870aba9340e848b389c532ece00d6630` | MHF_Slime | Hostile Mob |
+| `063085a6797f4785be1a21cd7580f752` | MHF_Ghast | Hostile Mob |
+| `4c38ed11596a4fd4ab1d26f386c1cbac` | MHF_Blaze | Hostile Mob |
+| `cab28771f0cd4fe7b12902c69eba79a5` | MHF_CaveSpider | Hostile Mob |
+| `fef85c492fdf47f89132552046243223` | MHF_Witch | Hostile Mob |
+| `0972bdd14b8649fb9ecca353f8491a51` | MHF_LavaSlime | Hostile Mob |
+| `8b57078bf1bd45df83c4d88d16768fbe` | MHF_Pig | Passive Mob |
+| `f159b274c22e4340b7c152abde147713` | MHF_Cow | Passive Mob |
+| `92deafa9430742d9b00388601598d6c0` | MHF_Chicken | Passive Mob |
+| `dfaad5514e7e45a1a6f7c6fc5ec823ac` | MHF_Sheep | Passive Mob |
+| `72e64683e3134c36a408c66b64e94af5` | MHF_Squid | Passive Mob |
+| `bd482739767c45dca1f8c33c40530952` | MHF_Villager | Passive Mob |
+| `757f90b223444b8d8dac824232e2cece` | MHF_Golem | Passive Mob |
+| `1bee9df54f7142a2bf52d97970d3fea3` | MHF_Ocelot | Passive Mob |
+| `b48a45553d4c464282338ec6ed7b368c` | MHF_Mooshroom | Passive Mob |
+| `8d2d1d6d80344c89bd86809a31fd5193` | MHF_Wolf | Passive Mob |
+| `9586e5ab157a4658ad80b07552a9ca63` | MHF_Herobrine | Special |
 
 ## Examples
 
@@ -126,7 +126,7 @@ curl -s https://your-domain.com/minecraft/mhf | jq .
 ### Get a specific MHF name with jq
 
 ```bash
-curl -s https://your-domain.com/minecraft/mhf | jq '.f4254a8e93e4455b8c8a6b6b6f6d6e6f'
+curl -s https://your-domain.com/minecraft/mhf | jq '.057b1c4713214863a6fe8887f9ec265f'
 ```
 
 Returns:
@@ -147,19 +147,19 @@ The UUIDs returned by this endpoint can be passed to any render endpoint as the 
 
 ```bash
 # Render a Creeper head
-curl -o creeper_head.png https://your-domain.com/head/f4254a8e93e4455b8c8a6b6b6f6d6e6f/128
+curl -o creeper_head.png https://your-domain.com/head/057b1c4713214863a6fe8887f9ec265f/128
 
 # Render a Zombie full body
-curl -o zombie_body.png https://your-domain.com/player/8b6a72138d69fbbd2fea3fa251cabd87/128/hat
+curl -o zombie_body.png https://your-domain.com/player/daca2c3d719b41f5b624e4039e6c04bd/128/hat
 
 # Render an Enderman isometric
-curl -o enderman_iso.png https://your-domain.com/avatar/a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4/right/128
+curl -o enderman_iso.png https://your-domain.com/avatar/40ffb37212f64678b3f22176bf56dd4b/right/128
 
 # Render Steve's isometric head
 curl -o steve_ioshead.png https://your-domain.com/ioshead/c06f89064c8a49119c29ea1dbd1aab82/left/128
 
 # Download a Skeleton skin
-curl -OJ https://your-domain.com/download/c37b40e6c6b3b5f8d5e7f8a9b0c1d2e3
+curl -OJ https://your-domain.com/download/a3f427a818c549c5a4fb64c6e0e1e0a8
 ```
 
 ### JavaScript example: render all MHF heads
@@ -185,10 +185,10 @@ async function renderAllMHFHeads() {
 
 ```html
 <div id="mhf-gallery">
-  <img src="https://your-domain.com/head/f4254a8e93e4455b8c8a6b6b6f6d6e6f/64" alt="Creeper" />
-  <img src="https://your-domain.com/head/8b6a72138d69fbbd2fea3fa251cabd87/64" alt="Zombie" />
-  <img src="https://your-domain.com/head/c37b40e6c6b3b5f8d5e7f8a9b0c1d2e3/64" alt="Skeleton" />
-  <img src="https://your-domain.com/head/a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4/64" alt="Enderman" />
+  <img src="https://your-domain.com/head/057b1c4713214863a6fe8887f9ec265f/64" alt="Creeper" />
+  <img src="https://your-domain.com/head/daca2c3d719b41f5b624e4039e6c04bd/64" alt="Zombie" />
+  <img src="https://your-domain.com/head/a3f427a818c549c5a4fb64c6e0e1e0a8/64" alt="Skeleton" />
+  <img src="https://your-domain.com/head/40ffb37212f64678b3f22176bf56dd4b/64" alt="Enderman" />
 </div>
 ```
 
@@ -198,10 +198,8 @@ This endpoint is not cached in the database since it returns a static, hardcoded
 
 ## Stats Tracking
 
-Each request to this endpoint is recorded as:
+Each request to this endpoint increments the Java edition counter, the same counter reported by `/allstats`:
 
-```
-endpoint: "mhf"
-input: "all"
-edition: "java"
+```js
+recordStats('java');
 ```

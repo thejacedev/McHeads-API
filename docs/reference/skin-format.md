@@ -20,14 +20,24 @@ There are two skin formats:
 | Legacy | 64x32 pixels | Original Minecraft |
 | Modern | 64x64 pixels | Minecraft 1.8+ |
 
-Both formats use the same upper half (rows 0-31) for the head, torso, left arm,
-and left leg. The modern format adds the lower half (rows 32-63) for overlay
-layers and dedicated right-side limb textures.
+Both formats use the same upper half (rows 0-31) for the head, torso, right arm,
+and right leg. The modern format adds the lower half (rows 32-63) for overlay
+layers and dedicated left-side limb textures. "Right" and "left" are the
+player's own sides, so in a front view the right arm appears on the viewer's
+left.
 
-The API detects the format by checking the image height:
+The API detects the format from the image dimensions (`skinFormat` in
+`utils/imageProcessor.js`): square images are modern, 2:1 images are legacy, and
+anything else is rejected. HD skins wider than 64 pixels are supported, with
+all coordinates scaled by `width / 64`:
 
 ```js
-const isNewFormat = skin.bitmap.height >= 64;
+function skinFormat(width, height) {
+    if (!width || (height !== width && height * 2 !== width)) {
+        throw new Error(`Unsupported skin dimensions: ${width}x${height}`);
+    }
+    return { scale: width / 64, isNewFormat: height === width };
+}
 ```
 
 ---
@@ -66,16 +76,17 @@ Full 64x64 Skin Texture:
        | Right | FRONT | Left  | Back  | Right | FRONT | Left  | Back  |
        | 4x12  | 4x12  | 4x12  | 4x12  | 4x12  | 8x12  | 8x12  | 4x12  |
        +-------+-------+-------+-------+-------+-------+-------+-------+
-  48   |       | RLeg  | RLeg  |       |       | RArm  | RArm  |       |
+  48   |       | LLeg  | LLeg  |       |       | LArm  | LArm  |       |
        |       | Top   | Bot   |       |       | Top   | Bot   |       |
        +-------+-------+-------+-------+-------+-------+-------+-------+
-  52   | RLeg  | RLeg  | RLeg  | RLeg  | RArm  | RArm  | RArm  | RArm  |
+  52   | LLeg  | LLeg  | LLeg  | LLeg  | LArm  | LArm  | LArm  | LArm  |
        | Right | FRONT | Left  | Back  | Right | FRONT | Left  | Back  |
        | 4x12  | 4x12  | 4x12  | 4x12  | 4x12  | 4x12  | 4x12  | 4x12  |
        +-------+-------+-------+-------+-------+-------+-------+-------+
   64
 
-  "Ov" = Overlay layer.  "R" prefix = Right-side (modern format only).
+  "Ov" = Overlay layer.  "L" prefix = Left-side limb (modern format only).
+  Unprefixed "Leg" and "Arm" in rows 16-31 are the right-side limbs.
   Rows 32-63 do not exist in legacy 64x32 skins.
 ```
 
@@ -118,7 +129,7 @@ All coordinates are **(x, y, width, height)** from the top-left corner.
 | Left | (28, 20) | 4x12 |
 | Back | (32, 20) | 8x12 |
 
-### Left Arm
+### Right Arm
 
 | Face | Position | Size |
 | ---- | -------- | ---- |
@@ -129,7 +140,7 @@ All coordinates are **(x, y, width, height)** from the top-left corner.
 | Left | (48, 20) | 4x12 |
 | Back | (52, 20) | 4x12 |
 
-### Left Leg
+### Right Leg
 
 | Face | Position | Size |
 | ---- | -------- | ---- |
@@ -140,7 +151,7 @@ All coordinates are **(x, y, width, height)** from the top-left corner.
 | Left | (8, 20) | 4x12 |
 | Back | (12, 20) | 4x12 |
 
-### Right Arm (Modern Format Only)
+### Left Arm (Modern Format Only)
 
 | Face | Position | Size |
 | ---- | -------- | ---- |
@@ -151,7 +162,7 @@ All coordinates are **(x, y, width, height)** from the top-left corner.
 | Left | (40, 52) | 4x12 |
 | Back | (44, 52) | 4x12 |
 
-### Right Leg (Modern Format Only)
+### Left Leg (Modern Format Only)
 
 | Face | Position | Size |
 | ---- | -------- | ---- |
@@ -162,14 +173,23 @@ All coordinates are **(x, y, width, height)** from the top-left corner.
 | Left | (24, 52) | 4x12 |
 | Back | (28, 52) | 4x12 |
 
+### Slim (Alex) Arms
+
+Skins that use the slim model (`metadata.model: "slim"` in the textures data
+from Mojang or GeyserMC) have arms 3 pixels wide instead of 4. The arm front
+faces start at the same positions listed above but are 3 pixels wide. The API
+reads the model and draws 3px arms in the `/player`, `/avatar` and `/iosbody`
+renders for modern-format skins.
+
 ---
 
 ## Overlay Layers
 
 The overlay (or "second layer") sits on top of the base layer with alpha
 blending. Each base part has a corresponding overlay region located 16 rows
-below it in the texture (for the torso, arms, and legs) or 32 columns to the
-right (for the head).
+below it in the texture (for the torso, right arm and right leg), 16 columns
+beside it (for the left arm and left leg, whose overlays are at (52, 52) and
+(4, 52)), or 32 columns to the right (for the head).
 
 Overlay pixels with alpha = 0 (fully transparent) show the base layer
 underneath. Overlay pixels with alpha = 255 (fully opaque) replace the base
@@ -187,10 +207,10 @@ Common uses of overlay layers:
 For 64x32 skins:
 
 - Only the upper half of the texture exists.
-- The right arm and right leg have no dedicated regions.
-- The API creates them by **horizontally mirroring** the left arm and left leg.
+- The left arm and left leg have no dedicated regions.
+- The API creates them by **horizontally mirroring** the right arm and right leg.
 - No overlay layers exist for the torso, arms, or legs (only the head hat
-  layer is available).
+  layer is available), so `/player/.../hat` draws only the head overlay.
 
 This mirroring means legacy skins always have symmetrical arms and legs, which
 was the intended design before Minecraft 1.8 introduced asymmetric skins.
@@ -206,6 +226,10 @@ The alpha channel is significant:
 - The overlay layers can have transparent pixels.
 - Fully transparent pixels `(0, 0, 0, 0)` in the overlay are common and mean
   "show the base layer here."
-- Some legacy skins use pure black `(0, 0, 0, 255)` in the hat layer instead
-  of transparency, which renders as a black overlay. The API does not attempt
-  to detect or fix this.
+- Many legacy 64x32 skins (Notch's included) fill the unused hat area with a
+  solid colour such as pure black `(0, 0, 0, 255)` instead of transparency.
+  Minecraft ignores the hat layer of a legacy skin when the right half of the
+  texture (x 32-64, y 0-32) has no pixel with alpha below 128, and the API
+  renderers do the same, so these skins don't get a solid black head. The rule
+  only applies to rendered images; `/skin` and `/download` return the texture
+  unchanged.

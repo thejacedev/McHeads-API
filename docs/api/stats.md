@@ -5,7 +5,7 @@ order: 9
 
 # Usage Statistics
 
-Three endpoints provide API usage statistics, tracking how many render requests have been served for Java and Bedrock edition players. Statistics are stored in the database and incremented on every render request.
+Three endpoints provide API usage statistics, tracking how many images have been served for Java and Bedrock edition players. Statistics are stored in the database and incremented every time an image is served.
 
 ## Endpoints
 
@@ -17,13 +17,13 @@ GET /allstatsSorted
 
 ## How Statistics Are Tracked
 
-Every time a render endpoint (`/head`, `/player`, `/avatar`, `/skin`, `/ioshead`, `/iosbody`, `/download`) processes a request, it calls `recordStats(endpoint, input, edition)`. This increments a counter in the `stats` table for the corresponding edition (`java` or `bedrock`).
+Every time an image endpoint (`/head`, `/player`, `/avatar`, `/skin`, `/ioshead`, `/iosbody`, `/download`) serves an image, it calls `recordStats(edition)`. This increments a counter in the `stats` table for the corresponding edition (`java` or `bedrock`). Images served from the cache are counted too; requests that fail (invalid input, unknown player, upstream errors) are not. Each call to `/minecraft/mhf` also increments the Java counter.
 
-Edition detection is based on the input format:
-- Inputs starting with `0000` or `.` are classified as **Bedrock**
-- All other inputs are classified as **Java**
+The edition comes from the parsed player identifier (see [Edition Detection](../getting-started/edition-detection.md)):
+- Dot-prefixed gamertags, `0000`-prefixed XUIDs and Floodgate UUIDs are classified as **Bedrock**
+- Java usernames and all other UUIDs are classified as **Java**
 
-The stats table has two rows, one for each edition, each with a cumulative count.
+The stats table has two rows, one for each edition, each with a cumulative count. Stats errors are logged and never fail the image request.
 
 ---
 
@@ -41,9 +41,9 @@ Returns the total number of requests served for Java edition players.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `head` | integer | Total number of Java edition requests across all render endpoints |
+| `head` | integer | Total number of Java edition images served across all image endpoints (plus `/minecraft/mhf` calls) |
 
-> **Note**: The field is named `head` for historical reasons, but it represents the total count across all endpoints (head, player, avatar, skin, etc.), not just head renders.
+> **Note**: The field is named `head` for historical reasons and is kept for compatibility, but it represents the total count across all endpoints (head, player, avatar, skin, etc.), not just head renders.
 
 ### Example
 
@@ -85,7 +85,7 @@ Returns the total number of requests served for Bedrock edition players.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `head` | integer | Total number of Bedrock edition requests across all render endpoints |
+| `head` | integer | Total number of Bedrock edition images served across all image endpoints |
 
 ### Example
 
@@ -132,7 +132,7 @@ The response is a JSON array of objects, sorted by `count` descending.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `endpoint` | string | Always `"head"` (legacy field name representing all endpoints) |
+| `endpoint` | string | Always `"head"` (kept for compatibility; the count covers all endpoints) |
 | `edition` | string | Either `"java"` or `"bedrock"` |
 | `count` | integer | Total number of requests for this edition |
 

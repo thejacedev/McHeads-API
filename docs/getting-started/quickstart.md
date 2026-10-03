@@ -26,10 +26,11 @@ Every render endpoint accepts a `:input` parameter that identifies the player. T
 | Java username | `Notch` | Java |
 | Java UUID (no dashes) | `069a79f444e94726a5befca90e38aaf5` | Java |
 | Java UUID (with dashes) | `069a79f4-44e9-4726-a5be-fca90e38aaf5` | Java |
-| Bedrock XUID | `0000123456789` | Bedrock |
+| Bedrock XUID (prefixed with `0000`) | `00002535468413142004` | Bedrock |
+| Floodgate UUID | `00000000-0000-0000-0009-01febe1ac3f4` | Bedrock |
 | Bedrock gamertag | `.ExampleGamertag` | Bedrock |
 
-Bedrock gamertags must be prefixed with a dot (`.`) to distinguish them from Java usernames.
+Bedrock gamertags must be prefixed with a dot (`.`) to distinguish them from Java usernames. Input that doesn't match any of these formats is rejected with HTTP 400. See [Edition Detection](edition-detection.md) for the exact rules.
 
 ## Get a Player Head
 
@@ -58,6 +59,8 @@ The size parameter is optional and defaults to `128` if omitted:
 # Defaults to 128x128
 curl -o head.png https://api.mcheads.org/head/Notch
 ```
+
+Missing, non-numeric or non-positive sizes use the default. Any other value is clamped to the range 8–512, so `/head/Notch/2000` returns a 512x512 image.
 
 ### Head with Hat Overlay
 
@@ -92,7 +95,7 @@ curl -o body_large.png https://api.mcheads.org/player/Notch/256
 curl -o body_hat.png https://api.mcheads.org/player/Notch/128/hat
 ```
 
-The body render supports both old-format (64x32) and new-format (64x64) skins. For old-format skins, the right arm and right leg are mirrored copies of the left side.
+The body render supports both old-format (64x32) and new-format (64x64) skins. Old-format skins only store the right arm and right leg, so the left arm and left leg are drawn as mirrored copies of them, and `hat` adds only the head overlay. Slim (Alex-style) skins are drawn with 3px-wide arms.
 
 ## Get an Isometric View
 
@@ -136,7 +139,7 @@ GET /iosbody/:input/:direction
 curl -o iso_body.png https://api.mcheads.org/iosbody/Notch/right
 ```
 
-The `/ioshead` and `/iosbody` endpoints default to a size of `64` pixels. You can pass a size as the third path segment if you need a different resolution.
+The `/ioshead` and `/iosbody` endpoints default to a size of `64` pixels. You can pass a size as the third path segment if you need a different resolution; it is clamped to 8–512 like other sizes.
 
 ## Get a Raw Skin
 
@@ -151,7 +154,7 @@ GET /skin/:input
 curl -o notch_skin.png https://api.mcheads.org/skin/Notch
 ```
 
-This returns the full 64x64 (or 64x32 for legacy skins) texture file exactly as stored by Mojang or GeyserMC.
+This returns the full 64x64 (or 64x32 for legacy skins) texture file exactly as stored on the texture server. Players without a custom skin get the default (classic Steve) texture.
 
 ### Download as File Attachment
 
@@ -165,7 +168,7 @@ GET /download/:input
 curl -OJ https://api.mcheads.org/download/Notch
 ```
 
-The downloaded file will be named `{input}_skin.png` (e.g., `Notch_skin.png`).
+The downloaded file will be named `{input}_skin.png` (e.g., `Notch_skin.png`), with any character other than letters, digits, `_` and `-` replaced by `_`.
 
 ## MHF Preset Heads
 
@@ -185,7 +188,7 @@ To list all available MHF heads:
 curl https://api.mcheads.org/minecraft/mhf
 ```
 
-This returns a JSON array of available MHF names and their UUIDs.
+This returns a JSON object mapping each MHF UUID to its name.
 
 ## Using in HTML
 
@@ -221,7 +224,7 @@ If a render fails (player not found, upstream API error, etc.), the API returns 
 
 ```json
 {
-    "error": "Failed to render head"
+    "error": "Player not found"
 }
 ```
 
@@ -229,15 +232,21 @@ Common error scenarios:
 
 | Scenario | HTTP Status | Response |
 |---|---|---|
-| Invalid player name or UUID | 500 | `{"error": "Failed to render head"}` |
+| Malformed player identifier | 400 | `{"error": "Invalid player identifier"}` |
 | Invalid direction (not `left`/`right`) | 400 | `{"error": "Direction must be \"left\" or \"right\""}` |
-| Upstream API down | 500 | `{"error": "Failed to render head"}` |
+| Player does not exist | 404 | `{"error": "Player not found"}` |
+| Too many requests (only if the server enables rate limiting) | 429 | `{"error": "Too many requests"}` |
+| Mojang, GeyserMC or the texture server down or timing out | 502 | `{"error": "Failed to render head"}` |
+| Any other failure | 500 | `{"error": "Failed to render head"}` |
+
+The 502 and 500 messages are specific to each endpoint (e.g. `"Failed to render player"`). See [Error Codes](../reference/error-codes.md) for the full list.
 
 ## Response Headers
 
 All image responses include:
 
 - `Content-Type: image/png`
+- `Cache-Control: public, max-age=3600`
 - CORS headers (via the `cors` middleware)
 - Security headers (via Helmet)
 - Gzip compression (via the `compression` middleware)

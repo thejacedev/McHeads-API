@@ -10,6 +10,11 @@ or full body by projecting flat skin faces onto an isometric cube using Canvas 2
 affine transforms. This is the most complex rendering pipeline in the API,
 combining **node-canvas** for geometry and **Sharp** for final resampling.
 
+The two render functions are `createIsometricHeadRender(skinBuffer, size,
+direction)` and `createIsometricBodyRender(skinBuffer, size, direction, slim)`.
+Both receive the skin PNG as a buffer; the skin is fetched beforehand by
+`getSkinImage`.
+
 ---
 
 ## How Isometric Projection Works
@@ -44,6 +49,19 @@ one side of an isometric cube:
                 Mirrors and shears for the back.
 ```
 
+Every face is drawn by the `drawFace` helper, which applies one matrix, draws
+one source rectangle of the skin into a `dw x dh` destination, and restores the
+context:
+
+```js
+function drawFace(ctx, img, matrix, src, [dw, dh]) {
+    ctx.save();
+    ctx.transform(...matrix);
+    ctx.drawImage(img, ...src, 0, 0, dw, dh);
+    ctx.restore();
+}
+```
+
 ---
 
 ## Scaling the Skin
@@ -62,12 +80,13 @@ function generateScaledSkin(skinImage, targetBlockSize) {
         newHeight *= 2;
     }
 
-    const tmpCanvas = createCanvas(newWidth, newHeight);
-    const tmpCtx = tmpCanvas.getContext('2d');
-    tmpCtx.imageSmoothingEnabled = false;
-    tmpCtx.drawImage(skinImage, 0, 0, newWidth, newHeight);
+    const canvas = createCanvas(newWidth, newHeight);
+    const ctx = canvas.getContext('2d');
 
-    return tmpImg;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(skinImage, 0, 0, newWidth, newHeight);
+
+    return canvas;
 }
 ```
 
@@ -86,9 +105,9 @@ Key points:
 
 ## Isometric Head Render
 
-The `createIsometricHeadRender` function draws a cube with six visible faces
-(front, left, right, top, plus overlay faces). It uses **9 canvas transforms**
-in total.
+The `createIsometricHeadRender` function draws the head cube's visible faces
+plus the hat overlay. The drawing is shared with the body render through
+`drawIsometricHead`, which makes **8 `drawFace` calls** in total.
 
 ### Working Canvas Size
 
@@ -102,21 +121,26 @@ rectHeight = side * 2.175
 This creates a square canvas large enough to contain the isometric cube with
 some padding.
 
-### The 9 Transforms
+### The 8 Transforms
 
-Each `ctx.save()` / `ctx.transform()` / `ctx.drawImage()` / `ctx.restore()`
-block draws one face of the cube:
+Each `drawFace` call (a `ctx.save()` / `ctx.transform()` / `ctx.drawImage()` /
+`ctx.restore()` block) draws one face of the cube, in this order (`bs` =
+`blockSize`, one 8-pixel block of the skin):
 
 | # | Face | Transform | Source region |
 |---|------|-----------|---------------|
-| 1 | Back-left | `(-1, -0.5, 0, 1, ...)` | Head left (6*bs, 1*bs) |
-| 2 | Back-right | `(1, -0.5, 0, 1, ...)` | Head right (7*bs, 1*bs) |
-| 3 | Right side | `(1, -0.5, 0, 1, ...)` | Head right (1*bs, 1*bs) |
-| 4 | Left side (front) | `(1, 0.5, 0, 1, ...)` | Head front (0, 1*bs) |
-| 5 | Top | `(1, -0.5, 1, 0.5, ...)` | Head top (1*bs, 0) |
-| 6 | Front-left overlay | `(1, 0.5, 0, 1, ...)` | Hat front-left (4*bs, 1*bs) |
-| 7 | Front-right overlay | `(1, -0.5, 0, 1, ...)` | Hat front-right (5*bs, 1*bs) |
-| 8 | Top overlay | `(1, -0.5, 1, 0.5, ...)` | Hat top (5*bs, 0) |
+| 1 | Hat left, behind the head (shows through the hat edges) | `(-1, -0.5, 0, 1, ...)` | Hat left (6*bs, 1*bs) = skin (48, 8) |
+| 2 | Hat back, behind the head (shows through the hat edges) | `(1, -0.5, 0, 1, ...)` | Hat back (7*bs, 1*bs) = skin (56, 8) |
+| 3 | Head front | `(1, -0.5, 0, 1, ...)` | Head front (1*bs, 1*bs) = skin (8, 8) |
+| 4 | Head right side | `(1, 0.5, 0, 1, ...)` | Head right (0, 1*bs) = skin (0, 8) |
+| 5 | Head top | `(1, -0.5, 1, 0.5, ...)` | Head top (1*bs, 0) = skin (8, 0) |
+| 6 | Hat right side | `(1, 0.5, 0, 1, ...)` | Hat right (4*bs, 1*bs) = skin (32, 8) |
+| 7 | Hat front | `(1, -0.5, 0, 1, ...)` | Hat front (5*bs, 1*bs) = skin (40, 8) |
+| 8 | Hat top | `(1, -0.5, 1, 0.5, ...)` | Hat top (5*bs, 0) = skin (40, 0) |
+
+In the right-facing render the front is the face on the viewer's right and the
+player's right side is the face on the viewer's left. The hat faces (1, 2, 6, 7
+and 8) are always drawn; the isometric renders have no `hat` option.
 
 The source regions use `blockSize` as the unit. For example, `blockSize * 6 + 1`
 means 6 block-widths from the left edge plus a 1-pixel inset to avoid sampling
@@ -162,35 +186,49 @@ The canvas is taller than wide to accommodate the full body proportions.
 
 ### Rendering Order (Bottom to Top)
 
-The body is drawn back-to-front so that closer parts overlap farther ones:
+The body is drawn back-to-front so that closer parts overlap farther ones. In
+the right-facing render the player's right side is nearest the viewer ("right"
+and "left" are the player's own sides):
 
-1. **Left leg** -- back faces, base and overlay.
-2. **Right leg** -- for legacy skins, flipped from left leg; for modern skins,
-   drawn from the dedicated right leg texture plus overlay.
-3. **Left leg overlays** (modern format).
-4. **Right arm** -- for legacy skins, flipped left arm; for modern skins, drawn
-   from the dedicated right arm region. Includes top face for 3D effect.
+1. **Right leg** -- front face.
+2. **Left leg** -- front face; for legacy skins, mirrored from the right leg;
+   for modern skins, drawn from the dedicated left leg texture plus overlay.
+3. **Right leg** -- side face, then overlay (modern format).
+4. **Left arm** (far) -- front and top faces; for legacy skins, mirrored from
+   the right arm; for modern skins, drawn from the dedicated left arm region
+   plus overlay.
 5. **Torso** -- front and side faces, plus overlay (modern format).
-6. **Left arm** -- front and side faces, plus top face and overlay.
-7. **Head** -- the same 9 transforms as the isometric head render, drawn last
-   so it sits on top of everything.
+6. **Right arm** (near) -- outer side, front and top faces, plus overlay
+   (modern format).
+7. **Head** -- the same 8 transforms as the isometric head render
+   (`drawIsometricHead`), drawn last so it sits on top of everything.
 
 ### Legacy vs Modern Format
 
-Format detection uses the same approach as the 2D body render:
+Format detection compares the image dimensions:
 
 ```js
 const isNewFormat = skinImage.height === skinImage.width;
 ```
 
 For legacy 64x32 skins:
-- Right arm and right leg are drawn by mirroring the left-side transforms
-  using `ctx.transform(-1, 0.5, ...)` which flips the x-axis.
-- No overlay layers are drawn for right-side limbs.
+- The left arm and left leg are drawn by mirroring the right arm and right leg
+  regions using `transform(-1, 0.5, ...)`, which flips the x-axis.
+- No overlay layers are drawn for the torso or limbs (the head's hat layer is
+  still drawn).
 
 For modern 64x64 skins:
 - Each limb has its own source region on the skin texture.
 - Overlay layers are drawn for all parts (torso, both arms, both legs).
+
+### Slim (Alex) Arms
+
+When `slim` is true and the skin is in the modern format, the arms are drawn
+3 skin pixels wide instead of 4: the source rectangles and the destination
+widths of the arm front, top and overlay faces are narrowed to three quarters.
+The far arm keeps its torso-side edge, and the near arm slides 1 pixel along
+its front face toward the torso so it stays attached. With `slim` false (the
+default) the output is unchanged.
 
 ---
 
@@ -233,8 +271,8 @@ So a body render at size 128 produces a 128x261 pixel image.
 | `GET /iosbody/:input/:direction/:option?` | `createIsometricBodyRender` | 64 |
 | `GET /avatar/:input/:direction/:size?` | `createIsometricBodyRender` | 128 |
 
-All three routes require a `direction` parameter of either `left` or `right`.
-Passing any other value returns a `400` error:
+Sizes are clamped to 8–512. All three routes require a `direction` parameter
+of either `left` or `right`. Passing any other value returns a `400` error:
 
 ```json
 { "error": "Direction must be \"left\" or \"right\"" }

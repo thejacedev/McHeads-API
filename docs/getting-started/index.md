@@ -41,14 +41,15 @@ Both formats work identically. The API accepts UUIDs with or without dashes.
 
 ### Bedrock Edition
 
-Bedrock players are identified by their Xbox Live XUID or gamertag. The API resolves these through the GeyserMC API (`api.geysermc.org`), which provides skin data for Bedrock players.
+Bedrock players are identified by their Xbox Live XUID, Floodgate UUID or gamertag. The API resolves these through the GeyserMC API (`api.geysermc.org`), which provides skin data for Bedrock players.
 
 ```
-GET /head/0000123456789/128       # XUID (starts with 0000)
-GET /head/.ExampleGamertag/128    # Gamertag (prefixed with a dot)
+GET /head/00002535468413142004/128                   # XUID (prefixed with 0000)
+GET /head/00000000-0000-0000-0009-01febe1ac3f4/128   # Floodgate UUID
+GET /head/.ExampleGamertag/128                       # Gamertag (prefixed with a dot)
 ```
 
-If a Bedrock player has no skin data available, the API falls back to the default Steve skin.
+If a player exists but has no custom skin, the API uses the default (classic Steve) skin. Unknown players get a 404. See [Edition Detection](edition-detection.md) for the exact input rules.
 
 ## How It Works
 
@@ -58,40 +59,41 @@ At a high level, every request follows the same path: parse the input, check the
 
 The rendering process follows these steps:
 
-1. **Input parsing** -- The API cleans the input (stripping `.png` suffixes, sanitizing parameters) and determines whether the player is Java or Bedrock edition. The `cleanParams` utility normalizes the URL parameters, and the `parseSize` utility converts the size string to an integer (defaulting to 128 if missing or invalid).
+1. **Input parsing** -- The API strips `.png` suffixes from the URL parameters (`cleanParams`), then `parsePlayer` validates the player identifier and determines whether the player is Java or Bedrock edition. Malformed identifiers are rejected with HTTP 400. The `parseSize` utility converts the size string to an integer: missing, non-numeric or non-positive values fall back to the endpoint default (128, or 64 for `/ioshead` and `/iosbody`), and anything else is clamped to 8–512.
 
-2. **Cache lookup** -- The API checks the database for a cached render matching the endpoint, input, size, and options. If a valid cache entry exists (less than 1 hour old), it is returned immediately. Cache hits skip all network requests and image processing, making them very fast.
+2. **Cache lookup** -- The API checks the database for a cached render matching the endpoint, normalized player, size, and options. If a valid cache entry exists (less than 1 hour old), it is returned immediately. Cache hits skip all network requests and image processing, making them very fast.
 
-3. **Profile resolution** -- For cache misses, the API fetches the player's profile and skin URL from the appropriate upstream service. For Java players, this is a two-step process: resolve the username to a UUID via `api.mojang.com`, then fetch the session profile (which contains the skin URL) from `sessionserver.mojang.com`. For Bedrock players, the GeyserMC API at `api.geysermc.org` handles both gamertag-to-XUID resolution and skin data retrieval.
+3. **Profile resolution** -- For cache misses, the API resolves the player to a skin URL and model (classic or slim) from the appropriate upstream service. For Java players, a username is first resolved to a UUID via `api.mojang.com`, then the session profile (which contains the skin URL) is fetched from `sessionserver.mojang.com`. For Bedrock players, the GeyserMC API at `api.geysermc.org` handles both gamertag-to-XUID resolution and skin data retrieval. Lookups are cached in memory for 10 minutes. Unknown players get a 404, and upstream failures or timeouts (5 seconds per request) get a 502.
 
-4. **Image rendering** -- The raw skin texture is downloaded from the resolved URL and processed into the requested render type. The skin texture is a standard Minecraft skin format -- either 64x64 pixels (new format, used since Minecraft 1.8) or 64x32 pixels (legacy format). Each body part occupies a specific region of this texture, and the rendering code crops, scales, and composites these regions according to the requested output.
+4. **Image rendering** -- The raw skin texture is downloaded from the resolved URL (and cached in memory for 24 hours) and processed into the requested render type. The skin texture is a standard Minecraft skin format -- either 64x64 pixels (new format, used since Minecraft 1.8) or 64x32 pixels (legacy format). Each body part occupies a specific region of this texture, and the rendering code crops, scales, and composites these regions according to the requested output.
 
-5. **Caching** -- The rendered PNG buffer is stored in the database with a 1-hour TTL, keyed by a combination of endpoint, input, size, and options. Subsequent requests for the same render will hit the cache until it expires.
+5. **Caching** -- The rendered PNG buffer is stored in the database with a 1-hour TTL, keyed by endpoint, normalized player, size, and options. Subsequent requests for the same render will hit the cache until it expires.
 
-6. **Response** -- The PNG buffer is sent to the client with `Content-Type: image/png` and appropriate security and compression headers.
+6. **Response** -- The PNG buffer is sent to the client with `Content-Type: image/png`, `Cache-Control: public, max-age=3600`, and the security and compression headers.
 
 ## Image Processing Libraries
 
-The API uses three image libraries, each suited to different render types:
+The API uses two image libraries:
 
-- **Sharp** -- Used for head renders. Extracts the 8x8 pixel head region from the skin texture, scales it to the requested size using nearest-neighbor interpolation (preserving pixel art), and optionally composites the hat overlay layer.
-
-- **Jimp** -- Used for full body renders. Assembles the body from individual parts (head, torso, left arm, right arm, left leg, right leg), each cropped from the skin texture at their standard coordinates. Supports both old-format (64x32) and new-format (64x64) skins.
+- **Sharp** -- Used for head renders. Extracts the 8x8 pixel head region from the skin texture, scales it to the requested size using nearest-neighbor interpolation (preserving pixel art), and optionally composites the hat overlay layer. Also used for full body renders: Sharp decodes the skin to raw pixels once, the body is assembled from individual parts (head, torso, both arms, both legs) by nearest-neighbor sampling, and Sharp encodes the result. Supports both old-format (64x32) and new-format (64x64) skins, and slim (3px-arm) models.
 
 - **node-canvas** -- Used for isometric 3D renders. Applies affine transforms to project each face of the body onto an isometric plane, producing a 3D appearance. The final canvas is scaled down with Lanczos resampling (via Sharp) for smooth output.
 
 ## Caching
 
-All renders are cached for **1 hour** in the configured database. The cache key is a combination of the endpoint name, player input, size, and any options (like `hat` or direction). This means:
+All renders are cached for **1 hour** in the configured database. The cache key is a combination of the endpoint name, the normalized player, the parsed size, and any options (like `hat` or direction), for example `head:name:notch:128:hat`. This means:
 
 - `GET /head/Notch/128` and `GET /head/Notch/256` are cached separately.
 - `GET /head/Notch/128` and `GET /head/Notch/128/hat` are cached separately.
 - `GET /avatar/Notch/left/128` and `GET /avatar/Notch/right/128` are cached separately.
+- `GET /head/Notch`, `GET /head/notch/128` and `GET /head/Notch/128.png` share one cache entry.
 - Repeated requests for the same render within 1 hour are served from cache without hitting the Mojang or GeyserMC APIs.
 
-Cache entries older than 1 hour are not proactively deleted. They remain in the database but are ignored by the cache lookup query, which filters by `created_at > (now - 1 hour)`. When the same key is requested again after expiry, the new render overwrites the stale entry using an upsert (`INSERT OR REPLACE` in SQLite, `ON CONFLICT DO UPDATE` in PostgreSQL).
+The lookup query only returns entries whose `created_at` is within the last hour, evaluated with the database's own clock. Expired rows are deleted at startup and every 10 minutes. When the same key is rendered again, the new render overwrites the old row with an `ON CONFLICT (key) DO UPDATE` upsert.
 
-The database backend is configurable. By default, the API uses a local SQLite file (`new_minecraft_heads.db`). For production deployments, you can set the `DATABASE_URL` environment variable to use PostgreSQL instead. See the [Self-Hosting](self-hosting.md) guide for database configuration details.
+Separately from the database, the API keeps two in-memory caches: player lookups (10 minutes) and downloaded skin textures (24 hours). See [Caching](../rendering/caching.md) for details.
+
+The database backend is configurable. By default, the API uses a local SQLite file (`new_minecraft_heads.db`, or the path in `SQLITE_PATH`). For production deployments, you can set the `DATABASE_URL` environment variable to use PostgreSQL instead. See the [Self-Hosting](self-hosting.md) guide for database configuration details.
 
 ## MHF Preset Heads
 
@@ -135,14 +137,15 @@ The `/health` endpoint returns a JSON status report including:
 curl https://api.mcheads.org/health
 ```
 
-The status is determined by analyzing recent health check logs stored in the database. If more than 50% of recent checks are errors, the status is `red`. If any errors exist or more than 30% are warnings, the status is `yellow`. Otherwise, it is `green`. The API stores up to 10,000 health log entries, pruning older ones on startup.
+The `status` field reflects the live check: `red` (HTTP 503) if the Mojang API is unreachable, `yellow` if it returned no data or the check took over 2 seconds, otherwise `green`. A separate `recent_status` field summarizes the checks logged in the last 5 minutes: `red` if more than 50% were errors, `yellow` if any were errors or more than 30% were warnings, otherwise `green`. Health logs older than 7 days are pruned at startup and every 10 minutes.
 
 ## Project Architecture
 
 The codebase is organized into route handlers and utility modules:
 
 ```
-server.js               Entry point, Express setup, middleware
+server.js               Entry point: database init, startup, graceful shutdown
+app.js                  Express app: middleware (Helmet, compression, CORS, rate limit) and routes
 routes/
     head.js             GET /head/:input/:size/:option
     player.js           GET /player/:input/:size/:option
@@ -154,14 +157,19 @@ routes/
     stats.js            GET /allstats, /allstatsbedrock, /allstatsSorted
     health.js           GET /health
 utils/
-    minecraft.js        Edition detection, Mojang + GeyserMC API calls
+    minecraft.js        Player identifier parsing, Mojang + GeyserMC API calls
     imageProcessor.js   All image rendering functions
-    database.js         SQLite/PostgreSQL abstraction, caching, stats
+    imageRoute.js       Shared handler used by every image endpoint
+    database.js         SQLite/PostgreSQL abstraction, caching, stats, health logs
+    memoryCache.js      In-memory TTL cache for player lookups and skin textures
+    http.js             Shared axios client for upstream requests (5-second timeout)
+    rateLimit.js        Optional per-IP rate limiter
+    errors.js           HttpError class (errors that map to an HTTP status)
     mhfHeads.js         MHF UUID-to-name mappings
-    urlHelpers.js       Parameter cleaning and size parsing
+    urlHelpers.js       Parameter cleaning, size and direction parsing
 ```
 
-Each route handler follows the same pattern: clean parameters, build a cache key, check the cache, call `getProfile` to resolve the player, call the appropriate render function, cache the result, and return the PNG.
+Every image endpoint is built with `imageRoute` and follows the same pattern: clean parameters, parse the player with `parsePlayer`, build a cache key, check the cache, resolve the skin with `getSkinInfo` and `getSkinImage`, call the appropriate render function, cache the result, and return the PNG.
 
 ## Technology Stack
 
@@ -169,7 +177,7 @@ Each route handler follows the same pattern: clean parameters, build a cache key
 |---|---|
 | Runtime | Node.js |
 | Framework | Express |
-| Image rendering | Sharp, Jimp, node-canvas |
+| Image rendering | Sharp, node-canvas |
 | Database | SQLite (better-sqlite3) or PostgreSQL (pg) |
 | HTTP client | Axios |
 | Security | Helmet (HTTP headers), CORS |
@@ -182,7 +190,8 @@ The API applies several security measures through Express middleware:
 - **Helmet** -- Sets secure HTTP headers (X-Content-Type-Options, X-Frame-Options, Content-Security-Policy, etc.). The `crossOriginResourcePolicy` is set to `cross-origin` so that images can be loaded from any domain.
 - **CORS** -- All origins are allowed, since the API is designed to serve images to any website.
 - **Compression** -- Gzip compression is applied to all responses.
-- **No authentication** -- The API is intentionally open. There are no API keys, rate limits, or access controls at the application level. If you need rate limiting, configure it at the reverse proxy level (see [Self-Hosting](self-hosting.md)).
+- **No authentication** -- The API is intentionally open. There are no API keys or access controls at the application level.
+- **Optional rate limiting** -- Set `RATE_LIMIT_PER_MINUTE` to enable a per-IP, in-memory limit; requests over the limit get HTTP 429 with a `Retry-After` header. It is disabled by default. Behind a reverse proxy, also set `TRUST_PROXY` so the limiter sees client IPs (see [Self-Hosting](self-hosting.md)).
 
 ## License
 

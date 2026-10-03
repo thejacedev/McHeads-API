@@ -78,46 +78,178 @@ When `DATABASE_URL` is set, the API:
 5. Uses `SERIAL` primary keys instead of `AUTOINCREMENT`.
 
 When `DATABASE_URL` is **not** set, the API uses **better-sqlite3** with the
-database file `./new_minecraft_heads.db` in the project root. The file is
-created automatically on first run.
+database file `./new_minecraft_heads.db` in the project root (or the path in
+[`SQLITE_PATH`](#sqlite_path)). The file is created automatically on first run.
 
 ---
 
 ### DATABASE_SSL
 
-Controls SSL for the PostgreSQL connection. Only relevant when `DATABASE_URL`
+Controls TLS for the PostgreSQL connection. Only relevant when `DATABASE_URL`
 is set.
 
 | Property | Value |
 | -------- | ----- |
 | **Variable** | `DATABASE_SSL` |
-| **Type** | String (`"true"` or `"false"`) |
-| **Default** | `true` (SSL enabled) |
+| **Type** | String (unset, `"no-verify"` or `"false"`) |
+| **Default** | Unset (TLS with certificate verification) |
 | **Required** | No |
+
+| Value | Behavior |
+| ----- | -------- |
+| _(unset)_ | TLS **with certificate verification**. The server certificate is checked against [`DATABASE_CA_CERT`](#database_ca_cert) if set, otherwise against the system CAs |
+| `no-verify` | TLS without certificate verification, for providers with self-signed certificates |
+| `false` | No TLS |
+
+Any other value (for example `true`) behaves the same as leaving it unset.
 
 ```bash
 DATABASE_SSL=false
 ```
 
-When SSL is enabled (the default), the connection uses:
+The setting is translated into the `ssl` option of the `pg` connection pool:
 
 ```js
-ssl: { rejectUnauthorized: false }
+function sslConfig() {
+    switch (process.env.DATABASE_SSL) {
+        case 'false': return false;
+        case 'no-verify': return { rejectUnauthorized: false };
+        default:
+            return process.env.DATABASE_CA_CERT
+                ? { ca: require('fs').readFileSync(process.env.DATABASE_CA_CERT, 'utf8') }
+                : true;
+    }
+}
 ```
 
-This allows connections to PostgreSQL instances with self-signed certificates,
-which is common with managed database services like Heroku Postgres, Railway,
-and Render.
+> **Behavior change:** older versions disabled certificate verification by
+> default. Certificates are now verified unless you set `DATABASE_SSL=no-verify`.
 
 Set `DATABASE_SSL=false` when connecting to a local PostgreSQL instance that
-does not support SSL:
+does not support TLS.
 
-```js
-ssl: false
-```
+**Troubleshooting:** if the server fails to connect with
+`self-signed certificate in certificate chain`, your provider signs its
+certificates with its own CA. Set [`DATABASE_CA_CERT`](#database_ca_cert) to the
+provider's CA certificate (recommended), or set `DATABASE_SSL=no-verify` (less
+secure, because the server's identity is not checked).
 
 This variable is ignored when using SQLite (i.e., when `DATABASE_URL` is not
 set).
+
+---
+
+### DATABASE_CA_CERT
+
+Path to a CA certificate file used to verify the PostgreSQL server's
+certificate. Only used when `DATABASE_URL` is set and `DATABASE_SSL` is unset.
+
+| Property | Value |
+| -------- | ----- |
+| **Variable** | `DATABASE_CA_CERT` |
+| **Type** | String (file path) |
+| **Default** | Not set (system CAs are used) |
+| **Required** | No |
+
+```bash
+DATABASE_CA_CERT=/etc/ssl/certs/provider-ca.pem
+```
+
+Use this for providers that sign their server certificates with their own CA,
+such as Supabase, Aiven and DigitalOcean. With the default verification against
+the system CAs, connections to these providers fail with
+`self-signed certificate in certificate chain`. Download the CA certificate
+from your provider and point this variable at it to keep certificate
+verification on. `DATABASE_SSL=no-verify` is the less secure alternative.
+
+The file is read once when the database module loads, so a missing or
+unreadable file stops the server from starting.
+
+---
+
+### SQLITE_PATH
+
+Path of the SQLite database file. Only used when `DATABASE_URL` is not set.
+
+| Property | Value |
+| -------- | ----- |
+| **Variable** | `SQLITE_PATH` |
+| **Type** | String (file path) |
+| **Default** | `./new_minecraft_heads.db` |
+| **Required** | No |
+
+```bash
+SQLITE_PATH=/var/lib/mcheads/heads.db
+```
+
+Relative paths are resolved against the working directory. The file is created
+if it does not exist. SQLite also creates `-wal` and `-shm` files next to it
+because the database runs in WAL mode.
+
+---
+
+### RATE_LIMIT_PER_MINUTE
+
+Enables a per-IP request limit.
+
+| Property | Value |
+| -------- | ----- |
+| **Variable** | `RATE_LIMIT_PER_MINUTE` |
+| **Type** | Integer |
+| **Default** | Not set (rate limiting disabled) |
+| **Required** | No |
+
+```bash
+RATE_LIMIT_PER_MINUTE=120
+```
+
+When set to a positive number, each client IP may make that many requests per
+one-minute window, across all endpoints. Further requests in the same window
+get:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 37
+Content-Type: application/json
+
+{"error": "Too many requests"}
+```
+
+`Retry-After` is the number of seconds until the window resets. Unset, `0`, or
+a non-numeric value disables the limiter.
+
+The limiter uses a fixed window and keeps its counts in memory, so each API
+process counts separately and the counts reset on restart. Behind a reverse
+proxy, also set [`TRUST_PROXY`](#trust_proxy); otherwise every request appears
+to come from the proxy's IP and all clients share one limit.
+
+---
+
+### TRUST_PROXY
+
+Sets Express's `trust proxy` setting, which controls how `req.ip` (used by the
+rate limiter) is derived from `X-Forwarded-For`.
+
+| Property | Value |
+| -------- | ----- |
+| **Variable** | `TRUST_PROXY` |
+| **Type** | `true`, an integer hop count, or a list of trusted addresses |
+| **Default** | Not set (`X-Forwarded-For` is ignored) |
+| **Required** | No |
+
+```bash
+TRUST_PROXY=1
+```
+
+The value is parsed as follows:
+
+- `true` -- trust every proxy (the boolean `true`).
+- A number such as `1` -- trust that many proxy hops in front of the server.
+- Anything else -- passed to Express unchanged, e.g. `loopback` or a
+  comma-separated list of addresses or subnets.
+
+Set it when the API runs behind nginx, a load balancer, or a hosting platform's
+proxy, so rate limiting sees client IPs.
 
 ---
 
@@ -141,7 +273,22 @@ PORT=3000
 ```env
 PORT=8080
 DATABASE_URL=postgresql://mcheads:secretpassword@db.example.com:5432/mcheads_production
-DATABASE_SSL=true
+# TLS with certificate verification is the default; no DATABASE_SSL needed
+```
+
+### PostgreSQL Provider with Its Own CA
+
+```env
+DATABASE_URL=postgresql://mcheads:secretpassword@db.example.com:5432/mcheads
+DATABASE_CA_CERT=/etc/ssl/certs/provider-ca.pem
+```
+
+### Behind a Reverse Proxy with Rate Limiting
+
+```env
+PORT=3005
+RATE_LIMIT_PER_MINUTE=120
+TRUST_PROXY=1
 ```
 
 ### Local PostgreSQL (No SSL)
@@ -166,14 +313,16 @@ This reads the `.env` file from the current working directory and populates
 `process.env`. Variables set in the actual system environment take precedence
 over `.env` file values.
 
-The database module (`utils/database.js`) reads the variables immediately on
-import:
+`server.js` then loads the Express app (`app.js`), which reads `TRUST_PROXY` and
+`RATE_LIMIT_PER_MINUTE`, and the database module (`utils/database.js`), which
+reads `DATABASE_URL`, `DATABASE_SSL`, `DATABASE_CA_CERT` and `SQLITE_PATH`
+immediately on import:
 
 ```js
 const usePostgres = !!process.env.DATABASE_URL;
 ```
 
-This means the database backend is determined once at startup and cannot be
+This means the configuration is determined once at startup and cannot be
 changed at runtime.
 
 ---
@@ -188,7 +337,7 @@ changed at runtime.
 | Timestamp type | `DATETIME` | `TIMESTAMPTZ` |
 | Concurrency | WAL mode (readers don't block) | Full MVCC |
 | Connection pooling | N/A (single file) | pg Pool |
-| SSL | N/A | Configurable |
+| TLS | N/A | Verified by default (`DATABASE_SSL`, `DATABASE_CA_CERT`) |
 | Deployment | Single server only | Multi-server capable |
 | File on disk | `new_minecraft_heads.db` | N/A |
 
@@ -202,7 +351,8 @@ changed at runtime.
 ### When to Use PostgreSQL
 
 - Production deployments with high traffic.
-- Multiple API instances sharing a cache (horizontal scaling).
+- Multiple API instances sharing a cache (horizontal scaling). Note that the
+  optional rate limiter still counts per instance.
 - Managed database services with automatic backups.
 - Integration with existing PostgreSQL infrastructure.
 

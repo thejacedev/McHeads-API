@@ -9,7 +9,7 @@ The Minecraft Heads API can be self-hosted on your own server. This guide covers
 
 ## Prerequisites
 
-- **Node.js 18+** -- The API uses modern JavaScript features and native dependencies.
+- **Node.js 20+** -- The API uses modern JavaScript features and native dependencies (`better-sqlite3` 12 requires Node 20 or newer). The test suite also uses Node's built-in test runner.
 - **Build tools** -- The `canvas` and `sharp` npm packages require native compilation. On most systems, these install prebuilt binaries automatically. If they fail, you may need to install system dependencies.
 
 ### System Dependencies for Canvas
@@ -74,7 +74,13 @@ cp .env.example .env
 |---|---|---|
 | `PORT` | `3005` | The port the HTTP server listens on |
 | `DATABASE_URL` | _(none)_ | PostgreSQL connection string. If not set, the API uses a local SQLite file |
-| `DATABASE_SSL` | `true` | Set to `false` to disable SSL for the PostgreSQL connection |
+| `DATABASE_SSL` | _(none)_ | Unset: TLS with certificate verification. `no-verify`: TLS without certificate verification. `false`: no TLS |
+| `DATABASE_CA_CERT` | _(none)_ | Path to a CA certificate file. When `DATABASE_SSL` is unset, the PostgreSQL server certificate is verified against this CA instead of the system CAs |
+| `SQLITE_PATH` | `./new_minecraft_heads.db` | SQLite database file, used when `DATABASE_URL` is not set |
+| `RATE_LIMIT_PER_MINUTE` | _(none)_ | Per-IP request limit per minute (in-memory, fixed window). Unset or `0` disables rate limiting |
+| `TRUST_PROXY` | _(none)_ | Express `trust proxy` setting: `true`, a hop count (e.g. `1`), or trusted addresses. Set it behind a reverse proxy |
+
+See [Environment Variables](../reference/environment.md) for full details.
 
 ### Minimal Configuration (SQLite)
 
@@ -82,6 +88,8 @@ For local development or small deployments, no configuration is needed. The API 
 
 ```env
 PORT=3005
+# Optional: store the database file somewhere else
+# SQLITE_PATH=/var/lib/mcheads/heads.db
 ```
 
 This is the simplest setup. SQLite handles caching, stats, and health logs in a single file with no external dependencies.
@@ -97,18 +105,41 @@ DATABASE_URL=postgresql://mcheads:password@localhost:5432/mcheads
 
 The API creates the required tables automatically on startup (`mcheads_stats`, `mcheads_cache`, `mcheads_health_logs`). Table names are prefixed with `mcheads_` when using PostgreSQL, so the API can share a database with other applications without naming conflicts.
 
-If your PostgreSQL instance does not use SSL (common for local development), disable it:
+The connection uses TLS with certificate verification by default. `DATABASE_SSL` changes this:
+
+| `DATABASE_SSL` | Behavior |
+|---|---|
+| _(unset)_ | TLS, certificate verified against `DATABASE_CA_CERT` if set, otherwise against the system CAs |
+| `no-verify` | TLS without certificate verification |
+| `false` | No TLS |
+
+If your PostgreSQL instance does not use TLS (common for local development), disable it:
 
 ```env
 DATABASE_URL=postgresql://mcheads:password@localhost:5432/mcheads
 DATABASE_SSL=false
 ```
 
+Some providers sign their server certificates with their own CA (for example Supabase, Aiven and DigitalOcean). With the default verification, connecting to them fails with:
+
+```
+self-signed certificate in certificate chain
+```
+
+Download the provider's CA certificate and point `DATABASE_CA_CERT` at it, keeping certificate verification on:
+
+```env
+DATABASE_URL=postgresql://mcheads:password@db.example.com:5432/mcheads
+DATABASE_CA_CERT=/etc/ssl/certs/provider-ca.pem
+```
+
+`DATABASE_SSL=no-verify` also makes the connection work, but it is less secure because the server's identity is not checked.
+
 ## Database Details
 
 ### SQLite (Default)
 
-- Database file: `new_minecraft_heads.db` in the project root
+- Database file: `new_minecraft_heads.db` in the project root (override with `SQLITE_PATH`)
 - Uses WAL (Write-Ahead Logging) journal mode for better concurrent read performance
 - Tables: `stats`, `cache`, `health_logs`
 - No setup required; the file is created on first run
@@ -118,11 +149,11 @@ DATABASE_SSL=false
 
 - Requires an existing PostgreSQL server (version 12+)
 - Tables: `mcheads_stats`, `mcheads_cache`, `mcheads_health_logs`
-- SSL enabled by default (set `DATABASE_SSL=false` to disable)
+- TLS with certificate verification by default (`DATABASE_CA_CERT` to verify against a custom CA, `DATABASE_SSL=no-verify` to skip verification, `DATABASE_SSL=false` to disable TLS)
 - Connection pooling handled by the `pg` library's `Pool` class
 - Tables are created automatically on startup via `CREATE TABLE IF NOT EXISTS`
 
-Both backends provide identical functionality. The API abstracts the differences internally.
+Both backends provide identical functionality. The API abstracts the differences internally. On either backend, expired cache rows are deleted at startup and every 10 minutes, and health logs older than 7 days are deleted on the same schedule.
 
 ## Docker Deployment
 
@@ -225,7 +256,7 @@ The API will be available at `http://localhost:3005`. PostgreSQL data is persist
     DATABASE_URL=${{Postgres.DATABASE_URL}}
     ```
 
-    Railway injects the `DATABASE_URL` from the PostgreSQL plugin automatically when you reference it with `${{Postgres.DATABASE_URL}}`.
+    Railway injects the `DATABASE_URL` from the PostgreSQL plugin automatically when you reference it with `${{Postgres.DATABASE_URL}}`. If the connection fails with `self-signed certificate in certificate chain`, see the TLS options under [PostgreSQL Configuration](#postgresql-configuration).
 
 6. Deploy. Railway assigns a public URL to your service.
 
@@ -255,6 +286,21 @@ server {
     }
 }
 ```
+
+Image responses already send `Cache-Control: public, max-age=3600`, which matches the API's own 1-hour cache.
+
+### Rate Limiting Behind a Proxy
+
+The API has an optional built-in rate limiter. Set `RATE_LIMIT_PER_MINUTE` to the number of requests each client IP may make per minute; requests over the limit get HTTP 429 `{"error":"Too many requests"}` with a `Retry-After` header. The counts are kept in memory in a fixed one-minute window, so each API process counts separately.
+
+Behind a reverse proxy, every request appears to come from the proxy's address unless you also set `TRUST_PROXY`, which configures Express's `trust proxy` setting so the client IP is taken from `X-Forwarded-For`:
+
+```env
+RATE_LIMIT_PER_MINUTE=120
+TRUST_PROXY=1
+```
+
+`TRUST_PROXY` accepts `true`, a hop count (such as `1` for a single proxy), or a list of trusted addresses.
 
 ## Process Management
 
@@ -315,6 +361,14 @@ curl http://localhost:3005/allstats
 
 The health endpoint checks connectivity to the Mojang API and reports the overall system status. A `green` status means all systems are operational.
 
+### Running the Tests
+
+The project includes a test suite that runs with Node's built-in test runner (Node 20+):
+
+```bash
+npm test
+```
+
 ## Graceful Shutdown
 
-The API listens for `SIGINT` (Ctrl+C) and closes the database connection before exiting. This prevents SQLite WAL file corruption and ensures PostgreSQL connections are released cleanly.
+The API listens for `SIGINT` (Ctrl+C) and `SIGTERM` (sent by systemd, Docker and most process managers). On either signal it stops accepting new connections, lets in-flight requests finish, closes the database connection, and exits. If shutdown takes longer than 10 seconds, the process is forced to exit with code 1. This prevents SQLite WAL file corruption and ensures PostgreSQL connections are released cleanly.

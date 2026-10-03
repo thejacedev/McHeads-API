@@ -5,7 +5,7 @@ order: 7
 
 # Skin Download
 
-Returns the raw skin texture PNG for a Minecraft player with a `Content-Disposition: attachment` header, causing browsers to trigger a file download dialog instead of displaying the image inline. The downloaded file is named `{input}_skin.png`.
+Returns the raw skin texture PNG for a Minecraft player with a `Content-Disposition: attachment` header, causing browsers to trigger a file download dialog instead of displaying the image inline. The downloaded file is named `{input}_skin.png`, with unsafe characters replaced by `_`.
 
 ## Endpoint
 
@@ -17,30 +17,33 @@ GET /download/:input
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `input` | string | Yes | -- | Player identifier. Accepts a Java username, UUID (with or without dashes), Bedrock XUID (starts with `0000`), or dot-prefixed Bedrock gamertag. |
+| `input` | string | Yes | -- | Player identifier. Accepts a Java username, UUID (with or without dashes), Bedrock XUID prefixed with `0000` (e.g., `00002535468413142004`), Floodgate UUID, or dot-prefixed Bedrock gamertag. |
 
 The `input` parameter automatically has any trailing `.png` suffix stripped before processing.
 
 ## How It Works
 
-1. The player profile is resolved via Mojang (Java) or GeyserMC (Bedrock) to obtain the skin texture URL.
-2. The skin image is fetched from the texture URL as raw binary data.
-3. The response is sent with both `Content-Type: image/png` and a `Content-Disposition: attachment` header that specifies the download filename.
+1. The player profile is resolved via Mojang (Java) or GeyserMC (Bedrock) to obtain the skin texture URL. If the player has no custom skin, the default skin is used.
+2. The skin image is fetched from the texture URL as raw binary data (or taken from the in-memory skin cache).
+3. The response is sent with `Content-Type: image/png`, `Cache-Control: public, max-age=3600`, and a `Content-Disposition: attachment` header that specifies the download filename.
 
 ### Response Headers
 
 | Header | Value | Purpose |
 |--------|-------|---------|
 | `Content-Type` | `image/png` | Identifies the file as a PNG image |
+| `Cache-Control` | `public, max-age=3600` | Allows browsers and proxies to cache the response for 1 hour |
 | `Content-Disposition` | `attachment; filename="{input}_skin.png"` | Triggers browser download with the specified filename |
 
-The filename uses the original `input` value (after `.png` stripping). For example:
+The filename uses the original `input` value (after `.png` stripping), with every character other than letters, digits, `_` and `-` replaced by `_`. For example:
 
 | Input | Filename |
 |-------|----------|
 | `Notch` | `Notch_skin.png` |
 | `069a79f444e94726a5befca90e38aaf5` | `069a79f444e94726a5befca90e38aaf5_skin.png` |
-| `.SomePlayer` | `.SomePlayer_skin.png` |
+| `069a79f4-44e9-4726-a5be-fca90e38aaf5` | `069a79f4-44e9-4726-a5be-fca90e38aaf5_skin.png` |
+| `.SomePlayer` | `_SomePlayer_skin.png` |
+| `.Some Player` | `_Some_Player_skin.png` |
 | `Notch.png` | `Notch_skin.png` (`.png` stripped first) |
 
 ## Response
@@ -80,7 +83,7 @@ curl -OJ https://your-domain.com/download/069a79f4-44e9-4726-a5be-fca90e38aaf5
 ### Bedrock player by XUID
 
 ```bash
-curl -OJ https://your-domain.com/download/0000000000000001
+curl -OJ https://your-domain.com/download/00002535468413142004
 ```
 
 ### Bedrock player by gamertag
@@ -88,6 +91,8 @@ curl -OJ https://your-domain.com/download/0000000000000001
 ```bash
 curl -OJ https://your-domain.com/download/.SomePlayer
 ```
+
+Saves as `_SomePlayer_skin.png`.
 
 ### With .png suffix
 
@@ -108,6 +113,7 @@ Returns:
 ```
 HTTP/1.1 200 OK
 Content-Type: image/png
+Cache-Control: public, max-age=3600
 Content-Disposition: attachment; filename="Notch_skin.png"
 ```
 
@@ -149,24 +155,27 @@ async function downloadSkin(username) {
 
 ## Error Responses
 
-### Player not found or skin fetch failure
+| Status | Body | When |
+|--------|------|------|
+| 400 | `{"error": "Invalid player identifier"}` | The `input` doesn't match any accepted format |
+| 404 | `{"error": "Player not found"}` | Mojang or GeyserMC reports that the player doesn't exist |
+| 502 | `{"error": "Failed to download skin"}` | Mojang, GeyserMC or the texture server failed or timed out |
+| 500 | `{"error": "Failed to download skin"}` | Any other failure |
 
 ```
-HTTP/1.1 500 Internal Server Error
+HTTP/1.1 404 Not Found
 Content-Type: application/json
 
 {
-  "error": "Failed to download skin"
+  "error": "Player not found"
 }
 ```
 
-This is returned when the player cannot be resolved, the skin URL is missing, or the upstream skin server is unreachable.
-
 ## Caching
 
-Unlike most other endpoints, the `/download` endpoint does **not** cache responses in the database. Each request fetches the skin fresh from the upstream provider. This ensures that downloaded skins are always up-to-date, which is important for users who are downloading skins to edit and re-upload.
+The `/download` endpoint returns the same bytes as `/skin`, so it shares `/skin`'s database cache entries (key `skin:{playerId}`, for example `skin:name:notch`) for 1 hour. A skin changed by the player can therefore take about an hour to appear here.
 
-Usage statistics are still recorded for each request.
+Usage statistics are recorded for every skin served, including cache hits.
 
 ## URL Patterns
 
@@ -175,7 +184,8 @@ Usage statistics are still recorded for each request.
 /download/Notch.png
 /download/069a79f444e94726a5befca90e38aaf5
 /download/069a79f4-44e9-4726-a5be-fca90e38aaf5
-/download/0000000000000001
+/download/00002535468413142004
+/download/00000000-0000-0000-0009-01febe1ac3f4
 /download/.SomePlayer
 ```
 
@@ -184,9 +194,9 @@ Usage statistics are still recorded for each request.
 | Feature | `/skin/:input` | `/download/:input` |
 |---------|---------------|-------------------|
 | Returns raw skin PNG | Yes | Yes |
-| `Content-Disposition` header | No | Yes (`attachment; filename="{input}_skin.png"`) |
+| `Content-Disposition` header | No | Yes (`attachment; filename="{input}_skin.png"`, unsafe characters replaced with `_`) |
 | Browser behavior | Displays image inline | Triggers file download |
-| Database cache | Yes (1 hour) | No |
+| Database cache | Yes (1 hour) | Yes (shares `/skin`'s entries) |
 | Stats tracking | Yes | Yes |
 | Use case | Embedding, API consumption | User-initiated file download |
 

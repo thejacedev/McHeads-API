@@ -19,28 +19,29 @@ This endpoint takes no parameters.
 
 ## How It Works
 
-When called, the health endpoint performs the following checks:
+When called, the health endpoint performs the following steps:
 
-1. **Database check**: The database connection is implicitly verified by querying health log history. If the query succeeds, the database is marked as `green`.
-2. **Mojang API check**: A test request is made to `https://api.mojang.com/users/profiles/minecraft/Notch` with a 5-second timeout.
+1. **Mojang API check**: A test request is made to `https://api.mojang.com/users/profiles/minecraft/Notch` using the shared HTTP client, which has a 5-second timeout.
    - If the response contains data, the external API status is `green`.
-   - If the response is empty or slow, the status is `yellow`.
+   - If the response is empty, the status is `yellow`.
    - If the request fails or times out, the status is `red`.
-3. **Response time**: The total time to complete all checks is measured in milliseconds.
-4. **Health log history**: Recent health check logs are retrieved from the database to calculate the 24-hour summary and recent check statistics.
+2. **Response time**: The time taken by the check is measured in milliseconds.
+3. **Live status**: `status` and `message` are determined from this check (see below).
+4. **Logging**: The result is written to the health log table *before* the history is read, so the current check counts towards the history.
+5. **Health log history**: The logged checks are summarized: `recent_status`, `recent_message`, `response_time_avg` and `recent_checks` cover the last 5 minutes, and `last_24h_summary` counts checks by status over the last 24 hours. The database connection is implicitly verified by these queries; if they succeed, `services.database` is `green`.
 
 ### Status Determination
 
-The overall status is determined by combining the results of all checks:
+The `status` and `message` fields reflect the live check, and always match the HTTP code:
 
-| Condition | Overall Status | HTTP Code |
-|-----------|---------------|-----------|
-| All checks pass | `green` | 200 |
-| External API slow OR response time > 2000ms | `yellow` | 200 |
-| External API unreachable | `red` | 503 |
-| Health check itself throws an error | `red` | 503 |
+| Condition | `status` | `message` | HTTP Code |
+|-----------|----------|-----------|-----------|
+| Mojang returned data and the check took 2000 ms or less | `green` | `All systems operational` | 200 |
+| Mojang returned no data, or the check took more than 2000 ms | `yellow` | `Performance degraded` | 200 |
+| Mojang request failed or timed out | `red` | `External API issues detected` | 503 |
+| Health check itself throws an error (e.g. a database query fails) | `red` | `Health check failed` | 503 |
 
-Each health check result is logged to the database for historical tracking.
+Historical checks never override `status` or `message`; their assessment is reported separately in `recent_status` and `recent_message`. Each health check result is logged to the database for historical tracking.
 
 ## Response
 
@@ -65,12 +66,14 @@ Each health check result is logged to the database for historical tracking.
     "used": 64,
     "total": 128
   },
-  "recent_checks": 5,
+  "recent_status": "green",
+  "recent_message": "All systems operational",
+  "uptime": 86400.512,
   "response_time_avg": 42,
+  "recent_checks": 5,
   "last_24h_summary": {
     "green": 1200,
-    "yellow": 15,
-    "red": 0
+    "yellow": 15
   }
 }
 ```
@@ -90,13 +93,16 @@ Each health check result is logged to the database for historical tracking.
 | `memory_usage` | object | Current heap memory usage |
 | `memory_usage.used` | integer | Used heap memory in megabytes (rounded) |
 | `memory_usage.total` | integer | Total heap memory in megabytes (rounded) |
-| `recent_checks` | integer | Number of health checks logged in the last 5 minutes |
-| `response_time_avg` | integer | Average response time of recent health checks in milliseconds |
-| `last_24h_summary` | object | Counts of each status level over the last 24 hours (up to 1440 entries) |
+| `recent_status` | string | Assessment of the checks logged in the last 5 minutes: `"green"`, `"yellow"`, or `"red"` (see [Recent Check Window](#recent-check-window)) |
+| `recent_message` | string | Human-readable message for `recent_status` |
+| `uptime` | number | Seconds since the Node.js process started, unrounded (`process.uptime()`) |
+| `response_time_avg` | integer | Average response time of the checks logged in the last 5 minutes, in milliseconds |
+| `recent_checks` | integer | Number of health checks logged in the last 5 minutes, including this one |
+| `last_24h_summary` | object | Number of checks logged in the last 24 hours, keyed by status. Statuses with no checks are omitted |
 
 ### Response Shape (Degraded)
 
-When external APIs are slow:
+When the Mojang check takes more than 2 seconds (or returns no data, in which case `external_apis` is also `yellow`):
 
 ```json
 {
@@ -105,7 +111,7 @@ When external APIs are slow:
   "timestamp": "2026-03-20T12:00:00.000Z",
   "services": {
     "database": "green",
-    "external_apis": "yellow",
+    "external_apis": "green",
     "response_time": "2150ms"
   },
   "uptime_seconds": 86400,
@@ -113,12 +119,14 @@ When external APIs are slow:
     "used": 72,
     "total": 128
   },
-  "recent_checks": 5,
+  "recent_status": "yellow",
+  "recent_message": "Some services experiencing issues",
+  "uptime": 86400.512,
   "response_time_avg": 1800,
+  "recent_checks": 5,
   "last_24h_summary": {
     "green": 1100,
-    "yellow": 115,
-    "red": 0
+    "yellow": 115
   }
 }
 ```
@@ -142,8 +150,11 @@ When the Mojang API is unreachable:
     "used": 68,
     "total": 128
   },
-  "recent_checks": 5,
+  "recent_status": "red",
+  "recent_message": "Multiple service errors detected",
+  "uptime": 86400.512,
   "response_time_avg": 4500,
+  "recent_checks": 5,
   "last_24h_summary": {
     "green": 900,
     "yellow": 100,
@@ -152,11 +163,11 @@ When the Mojang API is unreachable:
 }
 ```
 
-HTTP status code is `503 Service Unavailable` when the overall status is `red`.
+HTTP status code is `503 Service Unavailable` when `status` is `red`.
 
 ### Response Shape (Health Check Failure)
 
-When the health check itself fails:
+When the health check itself fails (for example, a database query throws):
 
 ```json
 {
@@ -206,7 +217,7 @@ Returns:
 curl -s -o /dev/null -w "%{http_code}" https://your-domain.com/health
 ```
 
-Returns `200` when healthy, `503` when the status is `red`.
+Returns `200` when `status` is `green` or `yellow`, `503` when it is `red`.
 
 ### Monitoring script
 
@@ -246,8 +257,7 @@ Output:
   "mojang_api": "green",
   "checks_24h": {
     "green": 1200,
-    "yellow": 15,
-    "red": 0
+    "yellow": 15
   }
 }
 ```
@@ -304,6 +314,8 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
   CMD curl -f http://localhost:3005/health || exit 1
 ```
 
+If rate limiting is enabled (`RATE_LIMIT_PER_MINUTE`), requests to `/health` count towards the per-IP limit like every other endpoint, and a probe over the limit gets HTTP 429.
+
 ## Health Log Storage
 
 Each health check result is logged to the `health_logs` table:
@@ -318,16 +330,20 @@ CREATE TABLE health_logs (
 );
 ```
 
-The table is pruned to keep only the most recent 10,000 entries during database initialization.
+Logs older than 7 days are deleted at startup and every 10 minutes. Time windows (7 days, 24 hours, 5 minutes) are evaluated in SQL using the database's own clock.
 
 ## Recent Check Window
 
-The health status calculation uses health logs from the **last 5 minutes** to determine the current state:
+The `recent_status` and `recent_message` fields summarize the health logs from the **last 5 minutes**. They do not affect `status`, `message` or the HTTP code:
 
-- If more than 50% of recent checks are `red`, the aggregated status is `red`.
-- If any checks are `red` or more than 30% are `yellow`, the aggregated status is `yellow`.
-- Otherwise, the status is `green`.
-- If there are no recent checks (no logs in the last 5 minutes), the status defaults to `red` with the message `"No recent health checks"`.
+| Condition (evaluated in order) | `recent_status` | `recent_message` |
+|-----------|-----------------|------------------|
+| No checks logged in the last 5 minutes | `red` | `No recent health checks` |
+| More than 50% of recent checks are `red` | `red` | `Multiple service errors detected` |
+| Any recent check is `red`, or more than 30% are `yellow` | `yellow` | `Some services experiencing issues` |
+| Otherwise | `green` | `All systems operational` |
+
+Because the current check is logged before the history is read, `recent_checks` is normally at least 1, and `"No recent health checks"` only appears if writing the log entry failed.
 
 ## Caching
 
