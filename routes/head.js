@@ -22,42 +22,19 @@
 
 const express = require('express');
 const router = express.Router();
-const { getProfile } = require('../utils/minecraft');
 const { createHeadRender } = require('../utils/imageProcessor');
-const { getCacheKey, getFromCache, saveToCache, recordStats } = require('../utils/database');
-const { cleanParams, parseSize } = require('../utils/urlHelpers');
+const { imageRoute } = require('../utils/imageRoute');
+const { parseSize } = require('../utils/urlHelpers');
 
-router.get('/head/:input/:size?/:option?', async (req, res) => {
-    const cleanedParams = cleanParams(req.params);
-    const { input, size, option } = cleanedParams;
-    const sizeInt = parseSize(req.params.size);
-    const cacheKey = getCacheKey('head', input, size, option);
-    
-    try {
-        const cached = await getFromCache(cacheKey);
-        if (cached) {
-            res.set('Content-Type', cached.content_type);
-            return res.send(cached.data);
-        }
-        
-        const { profile, edition } = await getProfile(input);
-        recordStats('head', input, edition);
-        
-        const skinUrl = profile.textures?.SKIN?.url || profile.skin_url;
-        if (!skinUrl) {
-            throw new Error('No skin URL found');
-        }
-
-        const headBuffer = await createHeadRender(skinUrl, sizeInt, option === 'hat');
-        
-        await saveToCache(cacheKey, headBuffer, 'image/png');
-        
-        res.set('Content-Type', 'image/png');
-        res.send(headBuffer);
-    } catch (error) {
-        console.error('Head render error:', error);
-        res.status(500).json({ error: 'Failed to render head' });
-    }
-});
+router.get('/head/:input/:size?/:option?', imageRoute({
+    endpoint: 'head',
+    errorMessage: 'Failed to render head',
+    parse: ({ size, option }) => {
+        const sizeInt = parseSize(size);
+        const hat = option === 'hat';
+        return { sizeInt, hat, cacheParts: [sizeInt, hat ? 'hat' : 'nohat'] };
+    },
+    render: (skin, skinInfo, { sizeInt, hat }) => createHeadRender(skin, sizeInt, hat)
+}));
 
 module.exports = router;

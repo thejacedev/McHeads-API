@@ -22,89 +22,29 @@
 
 const express = require('express');
 const router = express.Router();
-const { getProfile } = require('../utils/minecraft');
 const { createIsometricHeadRender, createIsometricBodyRender } = require('../utils/imageProcessor');
-const { getCacheKey, getFromCache, saveToCache, recordStats } = require('../utils/database');
-const { cleanParams } = require('../utils/urlHelpers');
+const { imageRoute } = require('../utils/imageRoute');
+const { parseSize, parseDirection } = require('../utils/urlHelpers');
 
-router.get('/iosbody/:input/:direction/:option?', async (req, res) => {
-    const cleanedParams = cleanParams(req.params);
-    const { input, direction, option } = cleanedParams;
+// These endpoints take the size as their optional third parameter and default to 64px.
+function parseIsometricParams({ direction, option }) {
+    const dir = parseDirection(direction);
+    const sizeInt = parseSize(option, 64);
+    return { dir, sizeInt, cacheParts: [dir, sizeInt] };
+}
 
-    if (!['left', 'right'].includes(direction)) {
-        return res.status(400).json({ error: 'Direction must be "left" or "right"' });
-    }
+router.get('/iosbody/:input/:direction/:option?', imageRoute({
+    endpoint: 'iosbody',
+    errorMessage: 'Failed to render iOS body',
+    parse: parseIsometricParams,
+    render: (skin, { slim }, { dir, sizeInt }) => createIsometricBodyRender(skin, sizeInt, dir, slim)
+}));
 
-    const cacheKey = getCacheKey('iosbody', input, direction, option);
-
-    try {
-        const cached = await getFromCache(cacheKey);
-        if (cached) {
-            res.set('Content-Type', cached.content_type);
-            return res.send(cached.data);
-        }
-
-        const { profile, edition } = await getProfile(input);
-        recordStats('iosbody', input, edition);
-
-        const skinUrl = profile.textures?.SKIN?.url || profile.skin_url;
-        if (!skinUrl) {
-            throw new Error('No skin URL found');
-        }
-
-        const size = option ? parseInt(option, 10) || 64 : 64;
-        const bodyBuffer = await createIsometricBodyRender(skinUrl, size, direction);
-
-        await saveToCache(cacheKey, bodyBuffer, 'image/png');
-
-        res.set('Content-Type', 'image/png');
-        res.send(bodyBuffer);
-    } catch (error) {
-        console.error('iOS body render error:', error);
-        res.status(500).json({ error: 'Failed to render iOS body' });
-    }
-});
-
-router.get('/ioshead/:input/:direction/:option?', async (req, res) => {
-    console.log('[IOSHEAD ROUTE] Hit with params:', req.params);
-    const cleanedParams = cleanParams(req.params);
-    const { input, direction, option } = cleanedParams;
-
-    if (!['left', 'right'].includes(direction)) {
-        return res.status(400).json({ error: 'Direction must be "left" or "right"' });
-    }
-
-    const cacheKey = getCacheKey('ioshead', input, direction, option);
-    console.log('[IOSHEAD ROUTE] Cache key:', cacheKey);
-
-    try {
-        const cached = await getFromCache(cacheKey);
-        if (cached) {
-            console.log('[IOSHEAD ROUTE] Returning cached data');
-            res.set('Content-Type', cached.content_type);
-            return res.send(cached.data);
-        }
-        console.log('[IOSHEAD ROUTE] No cache, rendering fresh');
-
-        const { profile, edition } = await getProfile(input);
-        recordStats('ioshead', input, edition);
-
-        const skinUrl = profile.textures?.SKIN?.url || profile.skin_url;
-        if (!skinUrl) {
-            throw new Error('No skin URL found');
-        }
-
-        const size = option ? parseInt(option, 10) || 64 : 64;
-        const headBuffer = await createIsometricHeadRender(skinUrl, size, direction);
-
-        await saveToCache(cacheKey, headBuffer, 'image/png');
-
-        res.set('Content-Type', 'image/png');
-        res.send(headBuffer);
-    } catch (error) {
-        console.error('iOS head render error:', error);
-        res.status(500).json({ error: 'Failed to render iOS head' });
-    }
-});
+router.get('/ioshead/:input/:direction/:option?', imageRoute({
+    endpoint: 'ioshead',
+    errorMessage: 'Failed to render iOS head',
+    parse: parseIsometricParams,
+    render: (skin, skinInfo, { dir, sizeInt }) => createIsometricHeadRender(skin, sizeInt, dir)
+}));
 
 module.exports = router;

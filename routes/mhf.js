@@ -26,7 +26,7 @@ const { getMHFHeads } = require('../utils/mhfHeads');
 const { recordStats } = require('../utils/database');
 
 router.get('/minecraft/mhf', (req, res) => {
-    recordStats('mhf', 'all', 'java');
+    recordStats('java');
     res.json(getMHFHeads());
 });
 

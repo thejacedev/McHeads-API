@@ -21,55 +21,40 @@
 // SOFTWARE.
 
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
-
-const app = express();
-const PORT = process.env.PORT || 3005;
-
-app.use(helmet({crossOriginResourcePolicy: { policy: "cross-origin" }}));
-app.use(compression());
-app.use(cors());
-app.use(express.json());
-
+const app = require('./app');
 const { initDatabase, closeDatabase } = require('./utils/database');
 
-const mhfRoutes = require('./routes/mhf');
-const playerRoutes = require('./routes/player');
-const headRoutes = require('./routes/head');
-const avatarRoutes = require('./routes/avatar');
-const skinRoutes = require('./routes/skin');
-const iosRoutes = require('./routes/ios');
-const statsRoutes = require('./routes/stats');
-const downloadRoutes = require('./routes/download');
-const healthRoutes = require('./routes/health');
-
-app.use('/', mhfRoutes);
-app.use('/', playerRoutes);
-app.use('/', headRoutes);
-app.use('/', avatarRoutes);
-app.use('/', skinRoutes);
-app.use('/', iosRoutes);
-app.use('/', statsRoutes);
-app.use('/', downloadRoutes);
-app.use('/', healthRoutes);
+const PORT = process.env.PORT || 3005;
+const SHUTDOWN_TIMEOUT_MS = 10 * 1000;
 
 initDatabase().then(() => {
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
         console.log(`Minecraft Heads API running on port ${PORT}`);
         console.log(`Health check: http://localhost:${PORT}/health`);
         console.log(`MHF Heads: http://localhost:${PORT}/minecraft/mhf`);
     });
+
+    let shuttingDown = false;
+    const shutdown = signal => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`${signal} received, shutting down gracefully...`);
+
+        // Stop accepting connections, let in-flight requests finish, then close the database.
+        server.close(async () => {
+            await closeDatabase();
+            console.log('Database connection closed.');
+            process.exit(0);
+        });
+        setTimeout(() => {
+            console.error('Shutdown timed out, forcing exit.');
+            process.exit(1);
+        }, SHUTDOWN_TIMEOUT_MS).unref();
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
 }).catch(err => {
     console.error('Failed to initialize database:', err);
     process.exit(1);
-});
-
-process.on('SIGINT', () => {
-    console.log('Shutting down gracefully...');
-    closeDatabase();
-    console.log('Database connection closed.');
-    process.exit(0);
 });

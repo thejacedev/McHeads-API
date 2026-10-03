@@ -20,14 +20,29 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-const express = require('express');
-const router = express.Router();
-const { imageRoute } = require('../utils/imageRoute');
+// Fixed-window, per-IP request limiter held in memory (one process only).
+// Behind a reverse proxy, set TRUST_PROXY so req.ip is the client's address
+// rather than the proxy's.
+function rateLimit({ windowMs, max }) {
+    let windowStart = Date.now();
+    let counts = new Map();
 
-router.get('/skin/:input', imageRoute({
-    endpoint: 'skin',
-    errorMessage: 'Failed to get skin',
-    render: skin => skin
-}));
+    return (req, res, next) => {
+        const now = Date.now();
+        if (now - windowStart >= windowMs) {
+            windowStart = now;
+            counts = new Map();
+        }
 
-module.exports = router;
+        const count = (counts.get(req.ip) || 0) + 1;
+        counts.set(req.ip, count);
+
+        if (count > max) {
+            res.set('Retry-After', String(Math.ceil((windowStart + windowMs - now) / 1000)));
+            return res.status(429).json({ error: 'Too many requests' });
+        }
+        next();
+    };
+}
+
+module.exports = rateLimit;

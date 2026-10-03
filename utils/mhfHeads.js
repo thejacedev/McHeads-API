@@ -20,31 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Official Mojang MHF_* accounts, keyed by UUID.
 const MHF_HEADS = {
     "c06f89064c8a49119c29ea1dbd1aab82": "MHF_Steve",
-    "f7c77d6e15b5a8d3f5b9a8b5c5d2f8a4": "MHF_Alex",
-    "f4254a8e93e4455b8c8a6b6b6f6d6e6f": "MHF_Creeper",
-    "8b6a72138d69fbbd2fea3fa251cabd87": "MHF_Zombie",
-    "c37b40e6c6b3b5f8d5e7f8a9b0c1d2e3": "MHF_Skeleton",
-    "d4c9b2f8e7a6b5c4d3e2f1a0b9c8d7e6": "MHF_Spider",
-    "a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4": "MHF_Enderman",
-    "b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3": "MHF_Slime",
-    "c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2": "MHF_Ghast",
-    "d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1": "MHF_Blaze",
-    "e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0": "MHF_Pig",
-    "f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9": "MHF_Cow",
-    "a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8": "MHF_Chicken",
-    "b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7": "MHF_Sheep",
-    "c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6": "MHF_Squid",
-    "d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5": "MHF_Villager",
-    "e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4": "MHF_Golem",
-    "f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3": "MHF_Ocelot",
-    "a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2": "MHF_Herobrine",
-    "b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1": "MHF_LavaSlime",
-    "c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0": "MHF_Mooshroom",
-    "d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9": "MHF_CaveSpider",
-    "e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8": "MHF_Wolf",
-    "f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7": "MHF_Witch"
+    "6ab4317889fd490597f60f67d9d76fd9": "MHF_Alex",
+    "057b1c4713214863a6fe8887f9ec265f": "MHF_Creeper",
+    "daca2c3d719b41f5b624e4039e6c04bd": "MHF_Zombie",
+    "a3f427a818c549c5a4fb64c6e0e1e0a8": "MHF_Skeleton",
+    "5ad55f3441b64bd29c3218983c635936": "MHF_Spider",
+    "40ffb37212f64678b3f22176bf56dd4b": "MHF_Enderman",
+    "870aba9340e848b389c532ece00d6630": "MHF_Slime",
+    "063085a6797f4785be1a21cd7580f752": "MHF_Ghast",
+    "4c38ed11596a4fd4ab1d26f386c1cbac": "MHF_Blaze",
+    "8b57078bf1bd45df83c4d88d16768fbe": "MHF_Pig",
+    "f159b274c22e4340b7c152abde147713": "MHF_Cow",
+    "92deafa9430742d9b00388601598d6c0": "MHF_Chicken",
+    "dfaad5514e7e45a1a6f7c6fc5ec823ac": "MHF_Sheep",
+    "72e64683e3134c36a408c66b64e94af5": "MHF_Squid",
+    "bd482739767c45dca1f8c33c40530952": "MHF_Villager",
+    "757f90b223444b8d8dac824232e2cece": "MHF_Golem",
+    "1bee9df54f7142a2bf52d97970d3fea3": "MHF_Ocelot",
+    "9586e5ab157a4658ad80b07552a9ca63": "MHF_Herobrine",
+    "0972bdd14b8649fb9ecca353f8491a51": "MHF_LavaSlime",
+    "b48a45553d4c464282338ec6ed7b368c": "MHF_Mooshroom",
+    "cab28771f0cd4fe7b12902c69eba79a5": "MHF_CaveSpider",
+    "8d2d1d6d80344c89bd86809a31fd5193": "MHF_Wolf",
+    "fef85c492fdf47f89132552046243223": "MHF_Witch"
 };
 
 function getMHFHeads() {

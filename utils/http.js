@@ -20,14 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-const express = require('express');
-const router = express.Router();
-const { imageRoute } = require('../utils/imageRoute');
+const axios = require('axios');
 
-router.get('/skin/:input', imageRoute({
-    endpoint: 'skin',
-    errorMessage: 'Failed to get skin',
-    render: skin => skin
-}));
+// Shared client for all upstream requests (Mojang, GeyserMC, texture server),
+// so a hung upstream can't hold requests open indefinitely.
+const http = axios.create({
+    timeout: 5000,
+    maxContentLength: 1024 * 1024
+});
 
-module.exports = router;
+module.exports = http;

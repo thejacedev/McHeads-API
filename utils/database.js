@@ -22,20 +22,37 @@
 
 const usePostgres = !!process.env.DATABASE_URL;
 
+const CACHE_TTL = [1, 'hour'];
+const HEALTH_LOG_RETENTION = [7, 'days'];
+const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+
 let db;
 
 if (usePostgres) {
     const { Pool } = require('pg');
     db = new Pool({
         connectionString: process.env.DATABASE_URL,
-        ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }
+        ssl: sslConfig()
     });
     console.log('Using PostgreSQL database');
 } else {
     const Database = require('better-sqlite3');
-    db = new Database('./new_minecraft_heads.db');
+    db = new Database(process.env.SQLITE_PATH || './new_minecraft_heads.db');
     db.pragma('journal_mode = WAL');
     console.log('Using SQLite database');
+}
+
+// Certificates are verified unless DATABASE_SSL=no-verify; DATABASE_SSL=false disables TLS.
+// For providers that sign with their own CA, point DATABASE_CA_CERT at the CA file.
+function sslConfig() {
+    switch (process.env.DATABASE_SSL) {
+        case 'false': return false;
+        case 'no-verify': return { rejectUnauthorized: false };
+        default:
+            return process.env.DATABASE_CA_CERT
+                ? { ca: require('fs').readFileSync(process.env.DATABASE_CA_CERT, 'utf8') }
+                : true;
+    }
 }
 
 const T = {
@@ -44,243 +61,193 @@ const T = {
     health_logs: usePostgres ? 'mcheads_health_logs' : 'health_logs'
 };
 
-async function initDatabase() {
+const ID_COLUMN = usePostgres ? 'id SERIAL PRIMARY KEY' : 'id INTEGER PRIMARY KEY AUTOINCREMENT';
+const BLOB = usePostgres ? 'BYTEA' : 'BLOB';
+const TIMESTAMP = usePostgres ? 'TIMESTAMPTZ' : 'DATETIME';
+
+// SQL for "now minus amount units", in the same clock and format the database
+// uses for CURRENT_TIMESTAMP. Only ever called with the constants above.
+function ago([amount, unit]) {
+    return usePostgres
+        ? `NOW() - INTERVAL '${amount} ${unit}'`
+        : `datetime('now', '-${amount} ${unit}')`;
+}
+
+const statements = new Map();
+
+// Runs one statement on either backend and returns its rows. SQL is written
+// with `?` placeholders, which are rewritten to $1..$n for Postgres.
+async function query(sql, params = []) {
     if (usePostgres) {
-        await db.query(`CREATE TABLE IF NOT EXISTS ${T.stats} (
-            id SERIAL PRIMARY KEY,
-            edition TEXT UNIQUE NOT NULL,
-            count INTEGER NOT NULL DEFAULT 0
-        )`);
+        let index = 0;
+        const { rows } = await db.query(sql.replace(/\?/g, () => `$${++index}`), params);
+        return rows;
+    }
 
-        const { rows } = await db.query(`SELECT COUNT(*) as total FROM ${T.stats}`);
-        if (parseInt(rows[0].total) === 0) {
-            await db.query(`INSERT INTO ${T.stats} (edition, count) VALUES ($1, $2)`, ['java', 0]);
-            await db.query(`INSERT INTO ${T.stats} (edition, count) VALUES ($1, $2)`, ['bedrock', 0]);
-            console.log('Initialized stats with default values: Java 0, Bedrock 0');
-        }
+    let statement = statements.get(sql);
+    if (!statement) {
+        statement = db.prepare(sql);
+        statements.set(sql, statement);
+    }
+    if (statement.reader) return statement.all(...params);
+    statement.run(...params);
+    return [];
+}
 
-        await db.query(`CREATE TABLE IF NOT EXISTS ${T.cache} (
-            id SERIAL PRIMARY KEY,
-            key TEXT UNIQUE NOT NULL,
-            data BYTEA,
-            content_type TEXT,
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-        )`);
+let pruneTimer;
 
-        await db.query(`CREATE TABLE IF NOT EXISTS ${T.health_logs} (
-            id SERIAL PRIMARY KEY,
-            status TEXT NOT NULL,
-            message TEXT,
-            response_time INTEGER,
-            timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-        )`);
+async function initDatabase() {
+    await query(`CREATE TABLE IF NOT EXISTS ${T.stats} (
+        ${ID_COLUMN},
+        edition TEXT UNIQUE NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0
+    )`);
 
-        await db.query(`DELETE FROM ${T.health_logs} WHERE id NOT IN (
-            SELECT id FROM ${T.health_logs} ORDER BY timestamp DESC LIMIT 10000
-        )`);
-    } else {
-        db.exec(`CREATE TABLE IF NOT EXISTS ${T.stats} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            edition TEXT UNIQUE NOT NULL,
-            count INTEGER NOT NULL DEFAULT 0
-        )`);
+    for (const edition of ['java', 'bedrock']) {
+        await query(`INSERT INTO ${T.stats} (edition, count) VALUES (?, 0) ON CONFLICT (edition) DO NOTHING`, [edition]);
+    }
 
-        const total = db.prepare(`SELECT COUNT(*) as total FROM ${T.stats}`).get();
-        if (total.total === 0) {
-            db.prepare(`INSERT INTO ${T.stats} (edition, count) VALUES (?, ?)`).run('java', 0);
-            db.prepare(`INSERT INTO ${T.stats} (edition, count) VALUES (?, ?)`).run('bedrock', 0);
-            console.log('Initialized stats with default values: Java 0, Bedrock 0');
-        }
+    await query(`CREATE TABLE IF NOT EXISTS ${T.cache} (
+        ${ID_COLUMN},
+        key TEXT UNIQUE NOT NULL,
+        data ${BLOB},
+        content_type TEXT,
+        created_at ${TIMESTAMP} DEFAULT CURRENT_TIMESTAMP
+    )`);
 
-        db.exec(`CREATE TABLE IF NOT EXISTS ${T.cache} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            key TEXT UNIQUE NOT NULL,
-            data BLOB,
-            content_type TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
+    await query(`CREATE TABLE IF NOT EXISTS ${T.health_logs} (
+        ${ID_COLUMN},
+        status TEXT NOT NULL,
+        message TEXT,
+        response_time INTEGER,
+        timestamp ${TIMESTAMP} DEFAULT CURRENT_TIMESTAMP
+    )`);
 
-        db.exec(`CREATE TABLE IF NOT EXISTS ${T.health_logs} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            status TEXT NOT NULL,
-            message TEXT,
-            response_time INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )`);
+    await pruneDatabase();
+    pruneTimer = setInterval(pruneDatabase, PRUNE_INTERVAL_MS);
+    pruneTimer.unref();
+}
 
-        db.exec(`DELETE FROM ${T.health_logs} WHERE id NOT IN (
-            SELECT id FROM ${T.health_logs} ORDER BY timestamp DESC LIMIT 10000
-        )`);
+// Deletes expired cache entries and old health logs so neither table grows forever.
+async function pruneDatabase() {
+    try {
+        await query(`DELETE FROM ${T.cache} WHERE created_at <= ${ago(CACHE_TTL)}`);
+        await query(`DELETE FROM ${T.health_logs} WHERE timestamp <= ${ago(HEALTH_LOG_RETENTION)}`);
+    } catch (err) {
+        console.error('Database prune error:', err);
     }
 }
 
-function getCacheKey(endpoint, input, size, option) {
-    return `${endpoint}_${input}_${size || 'default'}_${option || 'default'}`;
+function getCacheKey(endpoint, playerId, ...parts) {
+    return [endpoint, playerId, ...parts].join(':');
 }
 
 async function getFromCache(key) {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    if (usePostgres) {
-        const { rows } = await db.query(
-            `SELECT data, content_type FROM ${T.cache} WHERE key = $1 AND created_at > $2`,
-            [key, oneHourAgo]
-        );
-        return rows[0] || null;
-    } else {
-        return db.prepare(
-            `SELECT data, content_type FROM ${T.cache} WHERE key = ? AND created_at > ?`
-        ).get(key, oneHourAgo) || null;
-    }
+    const rows = await query(
+        `SELECT data FROM ${T.cache} WHERE key = ? AND created_at > ${ago(CACHE_TTL)}`,
+        [key]
+    );
+    return rows[0]?.data || null;
 }
 
 async function saveToCache(key, data, contentType) {
-    if (usePostgres) {
-        await db.query(
-            `INSERT INTO ${T.cache} (key, data, content_type) VALUES ($1, $2, $3)
-             ON CONFLICT (key) DO UPDATE SET data = $2, content_type = $3, created_at = CURRENT_TIMESTAMP`,
-            [key, data, contentType]
-        );
-    } else {
-        db.prepare(
-            `INSERT OR REPLACE INTO ${T.cache} (key, data, content_type) VALUES (?, ?, ?)`
-        ).run(key, data, contentType);
-    }
+    await query(
+        `INSERT INTO ${T.cache} (key, data, content_type, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE SET
+            data = excluded.data, content_type = excluded.content_type, created_at = excluded.created_at`,
+        [key, data, contentType]
+    );
 }
 
-async function recordStats(endpoint, input, edition) {
+async function recordStats(edition) {
     try {
-        if (usePostgres) {
-            await db.query(`UPDATE ${T.stats} SET count = count + 1 WHERE edition = $1`, [edition]);
-        } else {
-            db.prepare(`UPDATE ${T.stats} SET count = count + 1 WHERE edition = ?`).run(edition);
-        }
+        await query(`UPDATE ${T.stats} SET count = count + 1 WHERE edition = ?`, [edition]);
     } catch (err) {
         console.error('Stats update error:', err);
     }
 }
 
-async function getStats(edition = null) {
-    if (usePostgres) {
-        let query = `SELECT count FROM ${T.stats}`;
-        const params = [];
-        if (edition) {
-            query += ' WHERE edition = $1';
-            params.push(edition);
-        }
-        const { rows } = await db.query(query, params);
-        return rows[0] ? { head: rows[0].count } : { head: 0 };
-    } else {
-        let query = `SELECT count FROM ${T.stats}`;
-        const params = [];
-        if (edition) {
-            query += ' WHERE edition = ?';
-            params.push(edition);
-        }
-        const row = db.prepare(query).get(...params);
-        return row ? { head: row.count } : { head: 0 };
-    }
+async function getStats(edition) {
+    const rows = await query(`SELECT count FROM ${T.stats} WHERE edition = ?`, [edition]);
+    return { head: Number(rows[0]?.count ?? 0) };
 }
 
 async function getAllStatsSorted() {
-    if (usePostgres) {
-        const { rows } = await db.query(`SELECT edition, count FROM ${T.stats} ORDER BY count DESC`);
-        return rows.map(row => ({ endpoint: 'head', edition: row.edition, count: row.count }));
-    } else {
-        const rows = db.prepare(`SELECT edition, count FROM ${T.stats} ORDER BY count DESC`).all();
-        return rows.map(row => ({ endpoint: 'head', edition: row.edition, count: row.count }));
-    }
+    const rows = await query(`SELECT edition, count FROM ${T.stats} ORDER BY count DESC`);
+    // Counts cover every image endpoint; `endpoint` is kept for response compatibility.
+    return rows.map(row => ({ endpoint: 'head', edition: row.edition, count: Number(row.count) }));
 }
 
 async function logHealthCheck(status, message, responseTime) {
     try {
-        if (usePostgres) {
-            await db.query(
-                `INSERT INTO ${T.health_logs} (status, message, response_time) VALUES ($1, $2, $3)`,
-                [status, message, responseTime]
-            );
-        } else {
-            db.prepare(
-                `INSERT INTO ${T.health_logs} (status, message, response_time) VALUES (?, ?, ?)`
-            ).run(status, message, responseTime);
-        }
+        await query(
+            `INSERT INTO ${T.health_logs} (status, message, response_time) VALUES (?, ?, ?)`,
+            [status, message, responseTime]
+        );
     } catch (err) {
         console.error('Health log error:', err);
     }
 }
 
+// Summarizes logged health checks. Time windows are evaluated in SQL so they
+// don't depend on how each driver returns timestamps or on the server's time zone.
 async function getHealthStatus() {
-    let logs;
-    if (usePostgres) {
-        const result = await db.query(`
-            SELECT status, message, response_time, timestamp
-            FROM ${T.health_logs}
-            ORDER BY timestamp DESC
-            LIMIT 100
-        `);
-        logs = result.rows;
-    } else {
-        logs = db.prepare(`
-            SELECT status, message, response_time, timestamp
-            FROM ${T.health_logs}
-            ORDER BY timestamp DESC
-            LIMIT 100
-        `).all();
+    const [recent] = await query(`
+        SELECT COUNT(*) AS checks,
+               SUM(CASE WHEN status = 'red' THEN 1 ELSE 0 END) AS errors,
+               SUM(CASE WHEN status = 'yellow' THEN 1 ELSE 0 END) AS warnings,
+               AVG(response_time) AS avg_response_time
+        FROM ${T.health_logs}
+        WHERE timestamp > ${ago([5, 'minutes'])}
+    `);
+    const daily = await query(`
+        SELECT status, COUNT(*) AS count
+        FROM ${T.health_logs}
+        WHERE timestamp > ${ago([24, 'hours'])}
+        GROUP BY status
+    `);
+
+    // Postgres returns COUNT/SUM/AVG as strings, and SUM over no rows is NULL.
+    const checks = Number(recent.checks) || 0;
+    const errors = Number(recent.errors) || 0;
+    const warnings = Number(recent.warnings) || 0;
+
+    let recentStatus = 'green';
+    let recentMessage = 'All systems operational';
+
+    if (checks === 0) {
+        recentStatus = 'red';
+        recentMessage = 'No recent health checks';
+    } else if (errors > checks * 0.5) {
+        recentStatus = 'red';
+        recentMessage = 'Multiple service errors detected';
+    } else if (errors > 0 || warnings > checks * 0.3) {
+        recentStatus = 'yellow';
+        recentMessage = 'Some services experiencing issues';
     }
-
-    const now = new Date();
-    const recent = logs.filter(log => {
-        const logTime = new Date(log.timestamp);
-        return (now - logTime) < 5 * 60 * 1000;
-    });
-
-    let overallStatus = 'green';
-    let statusMessage = 'All systems operational';
-
-    if (recent.length === 0) {
-        overallStatus = 'red';
-        statusMessage = 'No recent health checks';
-    } else {
-        const errorCount = recent.filter(log => log.status === 'red').length;
-        const warningCount = recent.filter(log => log.status === 'yellow').length;
-
-        if (errorCount > recent.length * 0.5) {
-            overallStatus = 'red';
-            statusMessage = 'Multiple service errors detected';
-        } else if (errorCount > 0 || warningCount > recent.length * 0.3) {
-            overallStatus = 'yellow';
-            statusMessage = 'Some services experiencing issues';
-        }
-    }
-
-    const avgResponseTime = recent.length > 0
-        ? Math.round(recent.reduce((sum, log) => sum + (log.response_time || 0), 0) / recent.length)
-        : 0;
 
     return {
-        status: overallStatus,
-        message: statusMessage,
-        timestamp: now.toISOString(),
+        recent_status: recentStatus,
+        recent_message: recentMessage,
         uptime: process.uptime(),
-        response_time_avg: avgResponseTime,
-        recent_checks: recent.length,
-        last_24h_summary: logs.slice(0, 1440).reduce((acc, log) => {
-            acc[log.status] = (acc[log.status] || 0) + 1;
-            return acc;
-        }, {})
+        response_time_avg: Math.round(Number(recent.avg_response_time) || 0),
+        recent_checks: checks,
+        last_24h_summary: Object.fromEntries(daily.map(row => [row.status, Number(row.count)]))
     };
 }
 
-function closeDatabase() {
+async function closeDatabase() {
+    clearInterval(pruneTimer);
     if (usePostgres) {
-        db.end();
+        await db.end();
     } else {
         db.close();
     }
 }
 
 module.exports = {
-    db,
     initDatabase,
+    pruneDatabase,
     getCacheKey,
     getFromCache,
     saveToCache,

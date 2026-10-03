@@ -22,35 +22,15 @@
 
 const express = require('express');
 const router = express.Router();
-const { getProfile } = require('../utils/minecraft');
-const { getRawSkin } = require('../utils/imageProcessor');
-const { recordStats } = require('../utils/database');
-const { cleanParams } = require('../utils/urlHelpers');
+const { imageRoute } = require('../utils/imageRoute');
 
-router.get('/download/:input', async (req, res) => {
-    const cleanedParams = cleanParams(req.params);
-    const { input } = cleanedParams;
-    
-    try {
-        const { profile, edition } = await getProfile(input);
-        recordStats('download', input, edition);
-        
-        const skinUrl = profile.textures?.SKIN?.url || profile.skin_url;
-        if (!skinUrl) {
-            throw new Error('No skin URL found');
-        }
-        
-        const skinBuffer = await getRawSkin(skinUrl);
-        
-        res.set({
-            'Content-Type': 'image/png',
-            'Content-Disposition': `attachment; filename="${input}_skin.png"`
-        });
-        res.send(skinBuffer);
-    } catch (error) {
-        console.error('Download error:', error);
-        res.status(500).json({ error: 'Failed to download skin' });
-    }
-});
+router.get('/download/:input', imageRoute({
+    endpoint: 'skin', // same bytes as /skin, so share its cache entries
+    errorMessage: 'Failed to download skin',
+    render: skin => skin,
+    headers: ({ input }) => ({
+        'Content-Disposition': `attachment; filename="${input.replace(/[^A-Za-z0-9_-]/g, '_')}_skin.png"`
+    })
+}));
 
 module.exports = router;

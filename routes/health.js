@@ -23,35 +23,28 @@
 const express = require('express');
 const router = express.Router();
 const { logHealthCheck, getHealthStatus } = require('../utils/database');
-const axios = require('axios');
+const http = require('../utils/http');
 
 router.get('/health', async (req, res) => {
     const startTime = Date.now();
-    
+
     try {
-        const healthData = await getHealthStatus();
-        
         let externalApiStatus = 'green';
-        let externalApiMessage = 'External APIs responsive';
-        
+
         try {
-            const mojangTest = await axios.get('https://api.mojang.com/users/profiles/minecraft/Notch', {
-                timeout: 5000
-            });
+            const mojangTest = await http.get('https://api.mojang.com/users/profiles/minecraft/Notch');
             if (!mojangTest.data) {
                 externalApiStatus = 'yellow';
-                externalApiMessage = 'Mojang API slow response';
             }
         } catch (error) {
             externalApiStatus = 'red';
-            externalApiMessage = 'Mojang API unreachable';
         }
-        
+
         const responseTime = Date.now() - startTime;
-        
+
         let overallStatus = 'green';
         let statusMessage = 'All systems operational';
-        
+
         if (externalApiStatus === 'red') {
             overallStatus = 'red';
             statusMessage = 'External API issues detected';
@@ -59,10 +52,13 @@ router.get('/health', async (req, res) => {
             overallStatus = 'yellow';
             statusMessage = 'Performance degraded';
         }
-        
-        logHealthCheck(overallStatus, statusMessage, responseTime);
-        
-        const response = {
+
+        // Log first so this check counts towards the history below.
+        await logHealthCheck(overallStatus, statusMessage, responseTime);
+        const history = await getHealthStatus();
+        const memory = process.memoryUsage();
+
+        res.status(overallStatus === 'red' ? 503 : 200).json({
             status: overallStatus,
             message: statusMessage,
             timestamp: new Date().toISOString(),
@@ -73,23 +69,18 @@ router.get('/health', async (req, res) => {
             },
             uptime_seconds: Math.floor(process.uptime()),
             memory_usage: {
-                used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-                total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024)
+                used: Math.round(memory.heapUsed / 1024 / 1024),
+                total: Math.round(memory.heapTotal / 1024 / 1024)
             },
-            ...healthData
-        };
-        
-        const httpStatus = overallStatus === 'green' ? 200 : 
-                          overallStatus === 'yellow' ? 200 : 503;
-        
-        res.status(httpStatus).json(response);
-        
+            ...history
+        });
+
     } catch (error) {
         console.error('Health check error:', error);
-        
+
         const responseTime = Date.now() - startTime;
         logHealthCheck('red', 'Health check failed', responseTime);
-        
+
         res.status(503).json({
             status: 'red',
             message: 'Health check failed',

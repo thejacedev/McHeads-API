@@ -22,47 +22,19 @@
 
 const express = require('express');
 const router = express.Router();
-const { getProfile } = require('../utils/minecraft');
 const { createIsometricBodyRender } = require('../utils/imageProcessor');
-const { getCacheKey, getFromCache, saveToCache, recordStats } = require('../utils/database');
-const { cleanParams, parseSize } = require('../utils/urlHelpers');
+const { imageRoute } = require('../utils/imageRoute');
+const { parseSize, parseDirection } = require('../utils/urlHelpers');
 
-router.get('/avatar/:input/:direction/:size?', async (req, res) => {
-    const cleanedParams = cleanParams(req.params);
-    const { input, direction, size } = cleanedParams;
-
-    if (!['left', 'right'].includes(direction)) {
-        return res.status(400).json({ error: 'Direction must be "left" or "right"' });
-    }
-
-    const sizeInt = parseSize(size);
-    const cacheKey = getCacheKey('avatar', input, direction, size);
-
-    try {
-        const cached = await getFromCache(cacheKey);
-        if (cached) {
-            res.set('Content-Type', cached.content_type);
-            return res.send(cached.data);
-        }
-
-        const { profile, edition } = await getProfile(input);
-        recordStats('avatar', input, edition);
-
-        const skinUrl = profile.textures?.SKIN?.url || profile.skin_url;
-        if (!skinUrl) {
-            throw new Error('No skin URL found');
-        }
-
-        const avatarBuffer = await createIsometricBodyRender(skinUrl, sizeInt, direction);
-
-        await saveToCache(cacheKey, avatarBuffer, 'image/png');
-
-        res.set('Content-Type', 'image/png');
-        res.send(avatarBuffer);
-    } catch (error) {
-        console.error('Avatar render error:', error);
-        res.status(500).json({ error: 'Failed to render avatar' });
-    }
-});
+router.get('/avatar/:input/:direction/:size?', imageRoute({
+    endpoint: 'avatar',
+    errorMessage: 'Failed to render avatar',
+    parse: ({ direction, size }) => {
+        const dir = parseDirection(direction);
+        const sizeInt = parseSize(size);
+        return { dir, sizeInt, cacheParts: [dir, sizeInt] };
+    },
+    render: (skin, { slim }, { dir, sizeInt }) => createIsometricBodyRender(skin, sizeInt, dir, slim)
+}));
 
 module.exports = router;

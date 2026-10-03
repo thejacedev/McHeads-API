@@ -20,14 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-const express = require('express');
-const router = express.Router();
-const { imageRoute } = require('../utils/imageRoute');
+// An error that maps directly to an HTTP response status.
+class HttpError extends Error {
+    constructor(status, message, options) {
+        super(message, options);
+        this.status = status;
+    }
+}
 
-router.get('/skin/:input', imageRoute({
-    endpoint: 'skin',
-    errorMessage: 'Failed to get skin',
-    render: skin => skin
-}));
-
-module.exports = router;
+module.exports = { HttpError };

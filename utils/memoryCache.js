@@ -20,14 +20,37 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-const express = require('express');
-const router = express.Router();
-const { imageRoute } = require('../utils/imageRoute');
+// Bounded in-memory cache of promises. Concurrent callers for the same key share
+// one in-flight load, and failed loads are dropped so the next call retries.
+class TtlCache {
+    constructor({ ttlMs, maxEntries }) {
+        this.ttlMs = ttlMs;
+        this.maxEntries = maxEntries;
+        this.entries = new Map();
+    }
 
-router.get('/skin/:input', imageRoute({
-    endpoint: 'skin',
-    errorMessage: 'Failed to get skin',
-    render: skin => skin
-}));
+    getOrLoad(key, loader) {
+        const now = Date.now();
+        const entry = this.entries.get(key);
+        if (entry && entry.expires > now) {
+            return entry.promise;
+        }
 
-module.exports = router;
+        const promise = Promise.resolve().then(loader);
+        this.entries.delete(key);
+        this.entries.set(key, { promise, expires: now + this.ttlMs });
+        promise.catch(() => {
+            if (this.entries.get(key)?.promise === promise) {
+                this.entries.delete(key);
+            }
+        });
+
+        // Maps iterate in insertion order, so this evicts the oldest entries first.
+        while (this.entries.size > this.maxEntries) {
+            this.entries.delete(this.entries.keys().next().value);
+        }
+        return promise;
+    }
+}
+
+module.exports = { TtlCache };

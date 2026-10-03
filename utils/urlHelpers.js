@@ -20,28 +20,46 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const { HttpError } = require('./errors');
+
+const MIN_SIZE = 8;
+const MAX_SIZE = 512;
+
 function cleanParams(params) {
     const cleaned = { ...params };
-    
+
     Object.keys(cleaned).forEach(key => {
         if (cleaned[key] && typeof cleaned[key] === 'string') {
             cleaned[key] = cleaned[key].replace(/\.png$/i, '');
         }
     });
-    
+
     return cleaned;
 }
 
-function parseSize(sizeParam) {
-    if (!sizeParam) return 128;
-    
-    const cleanSize = sizeParam.replace(/\.png$/i, '');
-    const parsed = parseInt(cleanSize);
-    
-    return isNaN(parsed) ? 128 : parsed;
+// Missing, non-numeric or non-positive sizes fall back to the default; anything
+// else is clamped to MIN_SIZE..MAX_SIZE so a single request can't demand a
+// multi-gigabyte render.
+function parseSize(sizeParam, fallback = 128) {
+    if (!sizeParam) return fallback;
+
+    const parsed = parseInt(sizeParam.replace(/\.png$/i, ''), 10);
+    if (isNaN(parsed) || parsed < 1) return fallback;
+
+    return Math.min(Math.max(parsed, MIN_SIZE), MAX_SIZE);
+}
+
+function parseDirection(direction) {
+    if (direction !== 'left' && direction !== 'right') {
+        throw new HttpError(400, 'Direction must be "left" or "right"');
+    }
+    return direction;
 }
 
 module.exports = {
+    MIN_SIZE,
+    MAX_SIZE,
     cleanParams,
-    parseSize
+    parseSize,
+    parseDirection
 };
