@@ -74,8 +74,8 @@ cp .env.example .env
 |---|---|---|
 | `PORT` | `3005` | The port the HTTP server listens on |
 | `DATABASE_URL` | _(none)_ | PostgreSQL connection string. If not set, the API uses a local SQLite file |
-| `DATABASE_SSL` | _(none)_ | Unset: TLS with certificate verification. `no-verify`: TLS without certificate verification. `false`: no TLS |
-| `DATABASE_CA_CERT` | _(none)_ | Path to a CA certificate file. When `DATABASE_SSL` is unset, the PostgreSQL server certificate is verified against this CA instead of the system CAs |
+| `DATABASE_SSL` | _(none)_ | Unset: TLS without certificate verification. `verify`: TLS verified against the system CAs. `false`: no TLS |
+| `DATABASE_CA_CERT` | _(none)_ | Path to a CA certificate file. When set, the PostgreSQL server certificate is verified against this CA |
 | `SQLITE_PATH` | `./new_minecraft_heads.db` | SQLite database file, used when `DATABASE_URL` is not set |
 | `RATE_LIMIT_PER_MINUTE` | _(none)_ | Per-IP request limit per minute (in-memory, fixed window). Unset or `0` disables rate limiting |
 | `TRUST_PROXY` | _(none)_ | Express `trust proxy` setting: `true`, a hop count (e.g. `1`), or trusted addresses. Set it behind a reverse proxy |
@@ -105,12 +105,12 @@ DATABASE_URL=postgresql://mcheads:password@localhost:5432/mcheads
 
 The API creates the required tables automatically on startup (`mcheads_stats`, `mcheads_cache`, `mcheads_health_logs`). Table names are prefixed with `mcheads_` when using PostgreSQL, so the API can share a database with other applications without naming conflicts.
 
-The connection uses TLS with certificate verification by default. `DATABASE_SSL` changes this:
+The connection uses TLS without certificate verification by default, so hosts with self-signed certificates (Railway, Heroku and similar) work with no extra configuration. `DATABASE_SSL` changes this:
 
 | `DATABASE_SSL` | Behavior |
 |---|---|
-| _(unset)_ | TLS, certificate verified against `DATABASE_CA_CERT` if set, otherwise against the system CAs |
-| `no-verify` | TLS without certificate verification |
+| _(unset)_ | TLS without certificate verification (verified against `DATABASE_CA_CERT` if that is set) |
+| `verify` | TLS, certificate verified against `DATABASE_CA_CERT` if set, otherwise against the system CAs |
 | `false` | No TLS |
 
 If your PostgreSQL instance does not use TLS (common for local development), disable it:
@@ -120,20 +120,12 @@ DATABASE_URL=postgresql://mcheads:password@localhost:5432/mcheads
 DATABASE_SSL=false
 ```
 
-Some providers sign their server certificates with their own CA (for example Supabase, Aiven and DigitalOcean). With the default verification, connecting to them fails with:
-
-```
-self-signed certificate in certificate chain
-```
-
-Download the provider's CA certificate and point `DATABASE_CA_CERT` at it, keeping certificate verification on:
+To have the server's identity checked, set `DATABASE_SSL=verify`. If your provider signs its certificates with its own CA (for example Supabase, Aiven and DigitalOcean), verification against the system CAs fails with `self-signed certificate in certificate chain`; download the provider's CA certificate and point `DATABASE_CA_CERT` at it instead:
 
 ```env
 DATABASE_URL=postgresql://mcheads:password@db.example.com:5432/mcheads
 DATABASE_CA_CERT=/etc/ssl/certs/provider-ca.pem
 ```
-
-`DATABASE_SSL=no-verify` also makes the connection work, but it is less secure because the server's identity is not checked.
 
 ## Database Details
 
@@ -149,7 +141,7 @@ DATABASE_CA_CERT=/etc/ssl/certs/provider-ca.pem
 
 - Requires an existing PostgreSQL server (version 12+)
 - Tables: `mcheads_stats`, `mcheads_cache`, `mcheads_health_logs`
-- TLS with certificate verification by default (`DATABASE_CA_CERT` to verify against a custom CA, `DATABASE_SSL=no-verify` to skip verification, `DATABASE_SSL=false` to disable TLS)
+- TLS without certificate verification by default (`DATABASE_SSL=verify` or `DATABASE_CA_CERT` to verify, `DATABASE_SSL=false` to disable TLS)
 - Connection pooling handled by the `pg` library's `Pool` class
 - Tables are created automatically on startup via `CREATE TABLE IF NOT EXISTS`
 
@@ -256,7 +248,7 @@ The API will be available at `http://localhost:3005`. PostgreSQL data is persist
     DATABASE_URL=${{Postgres.DATABASE_URL}}
     ```
 
-    Railway injects the `DATABASE_URL` from the PostgreSQL plugin automatically when you reference it with `${{Postgres.DATABASE_URL}}`. If the connection fails with `self-signed certificate in certificate chain`, see the TLS options under [PostgreSQL Configuration](#postgresql-configuration).
+    Railway injects the `DATABASE_URL` from the PostgreSQL plugin automatically when you reference it with `${{Postgres.DATABASE_URL}}`. Railway's PostgreSQL uses a self-signed certificate, which the default TLS settings accept; don't set `DATABASE_SSL=verify` there.
 
 6. Deploy. Railway assigns a public URL to your service.
 

@@ -42,17 +42,17 @@ if (usePostgres) {
     console.log('Using SQLite database');
 }
 
-// Certificates are verified unless DATABASE_SSL=no-verify; DATABASE_SSL=false disables TLS.
-// For providers that sign with their own CA, point DATABASE_CA_CERT at the CA file.
+// TLS without certificate verification by default, since many hosts (Railway,
+// Heroku, ...) use self-signed certificates. DATABASE_SSL=verify checks the
+// certificate against the system CAs, or against DATABASE_CA_CERT when set;
+// DATABASE_SSL=false disables TLS.
 function sslConfig() {
-    switch (process.env.DATABASE_SSL) {
-        case 'false': return false;
-        case 'no-verify': return { rejectUnauthorized: false };
-        default:
-            return process.env.DATABASE_CA_CERT
-                ? { ca: require('fs').readFileSync(process.env.DATABASE_CA_CERT, 'utf8') }
-                : true;
+    if (process.env.DATABASE_SSL === 'false') return false;
+    if (process.env.DATABASE_CA_CERT) {
+        return { ca: require('fs').readFileSync(process.env.DATABASE_CA_CERT, 'utf8') };
     }
+    if (process.env.DATABASE_SSL === 'verify') return true;
+    return { rejectUnauthorized: false };
 }
 
 const T = {

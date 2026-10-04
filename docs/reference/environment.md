@@ -91,17 +91,17 @@ is set.
 | Property | Value |
 | -------- | ----- |
 | **Variable** | `DATABASE_SSL` |
-| **Type** | String (unset, `"no-verify"` or `"false"`) |
-| **Default** | Unset (TLS with certificate verification) |
+| **Type** | String (unset, `"verify"` or `"false"`) |
+| **Default** | Unset (TLS without certificate verification) |
 | **Required** | No |
 
 | Value | Behavior |
 | ----- | -------- |
-| _(unset)_ | TLS **with certificate verification**. The server certificate is checked against [`DATABASE_CA_CERT`](#database_ca_cert) if set, otherwise against the system CAs |
-| `no-verify` | TLS without certificate verification, for providers with self-signed certificates |
+| _(unset)_ | TLS without certificate verification, so self-signed certificates (Railway, Heroku, ...) work. If [`DATABASE_CA_CERT`](#database_ca_cert) is set, the certificate is verified against it |
+| `verify` | TLS **with certificate verification**, against `DATABASE_CA_CERT` if set, otherwise against the system CAs |
 | `false` | No TLS |
 
-Any other value (for example `true`) behaves the same as leaving it unset.
+Any other value behaves the same as leaving it unset.
 
 ```bash
 DATABASE_SSL=false
@@ -111,28 +111,23 @@ The setting is translated into the `ssl` option of the `pg` connection pool:
 
 ```js
 function sslConfig() {
-    switch (process.env.DATABASE_SSL) {
-        case 'false': return false;
-        case 'no-verify': return { rejectUnauthorized: false };
-        default:
-            return process.env.DATABASE_CA_CERT
-                ? { ca: require('fs').readFileSync(process.env.DATABASE_CA_CERT, 'utf8') }
-                : true;
+    if (process.env.DATABASE_SSL === 'false') return false;
+    if (process.env.DATABASE_CA_CERT) {
+        return { ca: require('fs').readFileSync(process.env.DATABASE_CA_CERT, 'utf8') };
     }
+    if (process.env.DATABASE_SSL === 'verify') return true;
+    return { rejectUnauthorized: false };
 }
 ```
-
-> **Behavior change:** older versions disabled certificate verification by
-> default. Certificates are now verified unless you set `DATABASE_SSL=no-verify`.
 
 Set `DATABASE_SSL=false` when connecting to a local PostgreSQL instance that
 does not support TLS.
 
 **Troubleshooting:** if the server fails to connect with
-`self-signed certificate in certificate chain`, your provider signs its
-certificates with its own CA. Set [`DATABASE_CA_CERT`](#database_ca_cert) to the
-provider's CA certificate (recommended), or set `DATABASE_SSL=no-verify` (less
-secure, because the server's identity is not checked).
+`self-signed certificate in certificate chain` after setting
+`DATABASE_SSL=verify`, your provider signs its certificates with its own CA.
+Set [`DATABASE_CA_CERT`](#database_ca_cert) to the provider's CA certificate,
+or remove `DATABASE_SSL=verify` to skip verification.
 
 This variable is ignored when using SQLite (i.e., when `DATABASE_URL` is not
 set).
@@ -142,13 +137,13 @@ set).
 ### DATABASE_CA_CERT
 
 Path to a CA certificate file used to verify the PostgreSQL server's
-certificate. Only used when `DATABASE_URL` is set and `DATABASE_SSL` is unset.
+certificate. Only used when `DATABASE_URL` is set and `DATABASE_SSL` is not `false`. Setting it turns certificate verification on.
 
 | Property | Value |
 | -------- | ----- |
 | **Variable** | `DATABASE_CA_CERT` |
 | **Type** | String (file path) |
-| **Default** | Not set (system CAs are used) |
+| **Default** | Not set |
 | **Required** | No |
 
 ```bash
@@ -156,11 +151,9 @@ DATABASE_CA_CERT=/etc/ssl/certs/provider-ca.pem
 ```
 
 Use this for providers that sign their server certificates with their own CA,
-such as Supabase, Aiven and DigitalOcean. With the default verification against
-the system CAs, connections to these providers fail with
-`self-signed certificate in certificate chain`. Download the CA certificate
-from your provider and point this variable at it to keep certificate
-verification on. `DATABASE_SSL=no-verify` is the less secure alternative.
+such as Supabase, Aiven and DigitalOcean, when you want the server's identity
+checked. (`DATABASE_SSL=verify` alone checks against the system CAs, which fails
+for these providers with `self-signed certificate in certificate chain`.)
 
 The file is read once when the database module loads, so a missing or
 unreadable file stops the server from starting.
@@ -273,7 +266,8 @@ PORT=3000
 ```env
 PORT=8080
 DATABASE_URL=postgresql://mcheads:secretpassword@db.example.com:5432/mcheads_production
-# TLS with certificate verification is the default; no DATABASE_SSL needed
+# Verify the server certificate against the system CAs
+DATABASE_SSL=verify
 ```
 
 ### PostgreSQL Provider with Its Own CA
@@ -337,7 +331,7 @@ changed at runtime.
 | Timestamp type | `DATETIME` | `TIMESTAMPTZ` |
 | Concurrency | WAL mode (readers don't block) | Full MVCC |
 | Connection pooling | N/A (single file) | pg Pool |
-| TLS | N/A | Verified by default (`DATABASE_SSL`, `DATABASE_CA_CERT`) |
+| TLS | N/A | On, unverified by default (`DATABASE_SSL`, `DATABASE_CA_CERT`) |
 | Deployment | Single server only | Multi-server capable |
 | File on disk | `new_minecraft_heads.db` | N/A |
 

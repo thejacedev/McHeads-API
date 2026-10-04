@@ -49,9 +49,9 @@ db = new Pool({
 });
 ```
 
-`sslConfig()` enables TLS with certificate verification by default (against
-`DATABASE_CA_CERT` if set, otherwise the system CAs). Set
-`DATABASE_SSL=no-verify` to skip verification, or `DATABASE_SSL=false` to
+`sslConfig()` enables TLS without certificate verification by default, which
+works with self-signed certificates. Set `DATABASE_SSL=verify` (or
+`DATABASE_CA_CERT`) to verify the server certificate, or `DATABASE_SSL=false` to
 disable TLS for local PostgreSQL instances. See
 [Environment Variables](../reference/environment.md#database_ssl).
 

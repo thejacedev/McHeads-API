@@ -32,8 +32,8 @@ npm test
 |----------|---------|-------------|
 | `PORT` | `3005` | Port the server listens on |
 | `DATABASE_URL` | — | PostgreSQL connection string (uses SQLite if not set) |
-| `DATABASE_SSL` | — | Unset: TLS with certificate verification. `no-verify`: TLS without verification. `false`: no TLS |
-| `DATABASE_CA_CERT` | — | Path to a CA certificate file to verify the PostgreSQL server against (used when `DATABASE_SSL` is unset) |
+| `DATABASE_SSL` | — | Unset: TLS without certificate verification (works with self-signed certificates). `verify`: TLS verified against the system CAs. `false`: no TLS |
+| `DATABASE_CA_CERT` | — | Path to a CA certificate file; when set, the PostgreSQL server certificate is verified against it |
 | `SQLITE_PATH` | `./new_minecraft_heads.db` | SQLite database file (used when `DATABASE_URL` is not set) |
 | `RATE_LIMIT_PER_MINUTE` | — | Per-IP request limit per minute, held in memory. Unset or `0` disables it |
 | `TRUST_PROXY` | — | Express `trust proxy` setting (`true`, a hop count, or addresses). Set it behind a reverse proxy so rate limiting sees client IPs |
