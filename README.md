@@ -36,6 +36,7 @@ npm test
 | `DATABASE_CA_CERT` | — | Path to a CA certificate file; when set, the PostgreSQL server certificate is verified against it |
 | `SQLITE_PATH` | `./new_minecraft_heads.db` | SQLite database file (used when `DATABASE_URL` is not set) |
 | `RATE_LIMIT_PER_MINUTE` | — | Per-IP request limit per minute, held in memory. Unset or `0` disables it |
+| `UPSTREAM_TIMEOUT_MS` | `10000` | Timeout per request to Mojang, GeyserMC and the texture server |
 | `TRUST_PROXY` | — | Express `trust proxy` setting (`true`, a hop count, or addresses). Set it behind a reverse proxy so rate limiting sees client IPs |
 
 Copy `.env.example` to `.env` and fill in your values.
@@ -146,7 +147,8 @@ utils/
   imageRoute.js     Shared handler for image endpoints (cache, render, errors)
   database.js       SQLite/PostgreSQL caching, stats and health logs
   memoryCache.js    In-memory TTL cache for player lookups and skins
-  http.js           Shared axios client for upstream requests (5 s timeout)
+  metrics.js        Rolling request-latency stats reported by /health
+  http.js           Shared axios client for upstream requests (10 s default timeout)
   rateLimit.js      Optional per-IP rate limiter
   errors.js         HttpError class
   mhfHeads.js       MHF UUID mappings

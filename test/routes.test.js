@@ -1,4 +1,13 @@
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+// A file database so tests can backdate cache rows through a second connection.
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcheads-routes-'));
+process.env.SQLITE_PATH = path.join(dir, 'test.db');
+
 const { stubUpstream, makeSkin, mojangProfile, texturesProperty } = require('./helpers');
+const Database = require('better-sqlite3');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const sharp = require('sharp');
@@ -31,9 +40,11 @@ const calls = stubUpstream(url => {
 
 let server;
 let base;
+let raw;
 
 test.before(async () => {
     await db.initDatabase();
+    raw = new Database(process.env.SQLITE_PATH);
     server = app.listen(0);
     await new Promise(resolve => server.once('listening', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
@@ -41,8 +52,16 @@ test.before(async () => {
 
 test.after(async () => {
     await new Promise(resolve => server.close(resolve));
+    raw.close();
     await db.closeDatabase();
+    fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// Plants an expired cache entry for a player this process hasn't looked up yet.
+function plantStaleImage(key, data) {
+    raw.prepare(`INSERT INTO cache (key, data, content_type, created_at)
+                 VALUES (?, ?, 'image/png', datetime('now', '-2 hours'))`).run(key, data);
+}
 
 async function get(path) {
     const response = await fetch(base + path);
@@ -89,6 +108,31 @@ test('upstream failures are a 502 with the endpoint message', async () => {
     } finally {
         mojangUp = true;
     }
+});
+
+test('a stale cached image is served when the upstream fails', async () => {
+    const staleImage = await sharp(SKIN).resize(64, 64).png().toBuffer();
+    plantStaleImage('head:name:outageguy:64:nohat', staleImage);
+
+    mojangUp = false;
+    try {
+        const { response, body } = await get('/head/OutageGuy/64');
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('cache-control'), 'public, max-age=60');
+        assert.deepEqual(body, staleImage);
+    } finally {
+        mojangUp = true;
+    }
+});
+
+test('a stale cached image is re-rendered when the upstream is up', async () => {
+    UUIDS.Refresher = 'aaaa1111aaaa4111aaaa1111aaaa1111';
+    plantStaleImage('head:name:refresher:64:nohat', Buffer.from('old render'));
+
+    const { response, body } = await get('/head/Refresher/64');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'public, max-age=3600');
+    assert.deepEqual(await dimensions(body), [64, 64]);
 });
 
 test('GET /player with hat works for legacy skins', async () => {
@@ -141,6 +185,11 @@ test('GET /health reports the live status with a matching HTTP code', async () =
     assert.equal(report.status, 'green');
     assert.equal(report.recent_status, 'green');
     assert.ok(report.recent_checks >= 1);
+    // response_time_avg is the API's own speed on real requests, not Mojang's.
+    assert.ok(report.requests_last_5m > 0);
+    assert.equal(typeof report.response_time_avg, 'number');
+    assert.ok(report.response_time_p95 >= report.response_time_avg);
+    assert.equal(typeof report.external_api_latency_avg, 'number');
 
     mojangUp = false;
     try {

@@ -15,12 +15,21 @@ function stubUpstream(handler) {
     const calls = [];
     http.get = async (url, config = {}) => {
         calls.push(url);
-        const { status = 200, data } = (await handler(url)) || { status: 404 };
+        const request = { method: 'get', url };
+        let result;
+        try {
+            result = await handler(url);
+        } catch (error) {
+            error.config = request;
+            throw error;
+        }
+        const { status = 200, data } = result || { status: 404 };
         const accepted = config.validateStatus
             ? config.validateStatus(status)
             : status >= 200 && status < 300;
         if (!accepted) {
             const error = new Error(`Request failed with status code ${status}`);
+            error.config = request;
             error.response = { status, data };
             throw error;
         }

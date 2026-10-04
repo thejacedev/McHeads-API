@@ -11,7 +11,7 @@ URL through external APIs. Java Edition players are resolved through the Mojang
 API; Bedrock Edition players are resolved through the GeyserMC API.
 
 All upstream requests go through a shared axios client (`utils/http.js`) with a
-5-second timeout and a 1 MB response size limit. The resolved `{ skinUrl, slim }`
+10-second default timeout (`UPSTREAM_TIMEOUT_MS`) and a 1 MB response size limit. The resolved `{ skinUrl, slim }`
 for each player is cached in memory for 10 minutes, and downloaded skin PNGs are
 cached in memory for 24 hours, keyed by texture URL. Concurrent requests for the
 same player or texture share one in-flight lookup, and failed lookups are not
@@ -194,7 +194,7 @@ GET textures.minecraft.net/texture/{hash}
     v
 Raw skin PNG buffer --> rendering pipeline
 
-Any upstream error or 5-second timeout --> HTTP 502
+Any upstream error or timeout --> stale cached image if one exists, else HTTP 502
 ```
 
 ---
@@ -281,7 +281,7 @@ a 502, exactly as for Java players.
 | Username does not exist (Java) | Mojang returns 404 or 204; API returns 404 `Player not found` |
 | UUID does not exist (Java) | Session server returns 404 or 204; API returns 404 `Player not found` |
 | Java player has no custom skin | No `SKIN` texture in the profile; default skin is used |
-| Mojang API down or slow | Request fails or times out after 5 seconds; API returns 502 with the endpoint's generic message |
+| Mojang API down or slow | Request fails or times out after 10 seconds; the API serves an older cached render if it has one, otherwise 502 with the endpoint's generic message |
 | Gamertag unknown to GeyserMC (Bedrock) | GeyserMC returns 503 "Unable to find user"; API returns 404 `Player not found` |
 | GeyserMC API down (Bedrock) | API returns 502 with the endpoint's generic message |
 | Bedrock player has no skin | GeyserMC returns `{}`; default skin is used |

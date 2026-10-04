@@ -47,9 +47,9 @@ settings, rate limiting, and reverse proxy configuration.
 | Hat overlay region | 8x8 pixels at (40, 8) |
 | Java API | api.mojang.com + sessionserver.mojang.com |
 | Bedrock API | api.geysermc.org/v2 |
-| Cache TTL | 1 hour (database), plus in-memory player (10 min) and skin (24 h) caches |
+| Cache TTL | 1 hour fresh, kept 24 h as a fallback (database), plus in-memory player (10 min) and skin (24 h) caches |
 | Size range | 8–512 px (default 128, or 64 for `/ioshead` and `/iosbody`) |
-| Upstream timeout | 5 seconds per request |
+| Upstream timeout | 10 seconds per request (`UPSTREAM_TIMEOUT_MS`) |
 | Default port | 3005 |
 | Default database | SQLite (new_minecraft_heads.db) |
 | Error format | `{ "error": "message" }` |
@@ -66,7 +66,8 @@ settings, rate limiting, and reverse proxy configuration.
 | `utils/imageRoute.js` | Shared handler for image endpoints: cache, render, error responses |
 | `utils/database.js` | Cache, stats, and health log storage |
 | `utils/memoryCache.js` | In-memory TTL cache for player lookups and skin textures |
-| `utils/http.js` | Shared axios client for upstream requests (5-second timeout) |
+| `utils/metrics.js` | Rolling request-latency stats (`response_time_avg`, `response_time_p95`) reported by `/health` |
+| `utils/http.js` | Shared axios client for upstream requests (10-second default timeout) |
 | `utils/rateLimit.js` | Optional per-IP rate limiter |
 | `utils/errors.js` | `HttpError`, an error that maps to an HTTP status |
 | `utils/urlHelpers.js` | Parameter cleaning, size and direction parsing |

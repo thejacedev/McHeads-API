@@ -26,23 +26,28 @@ test.after(async () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a freshly cached image is returned', async () => {
+test('a freshly cached image is returned as fresh', async () => {
     const data = Buffer.from('png bytes');
     await db.saveToCache('head:name:notch:64:nohat', data, 'image/png');
-    assert.deepEqual(await db.getFromCache('head:name:notch:64:nohat'), data);
+    assert.deepEqual(await db.getFromCache('head:name:notch:64:nohat'), { data, fresh: true });
+    assert.equal(await db.getFromCache('never-cached'), null);
 });
 
 test('saving again replaces the cached image', async () => {
     await db.saveToCache('replace-me', Buffer.from('old'), 'image/png');
     await db.saveToCache('replace-me', Buffer.from('new'), 'image/png');
-    assert.deepEqual(await db.getFromCache('replace-me'), Buffer.from('new'));
+    assert.deepEqual((await db.getFromCache('replace-me')).data, Buffer.from('new'));
 });
 
-test('cache entries expire after an hour and are pruned', async () => {
+test('cache entries go stale after an hour and are pruned after a day', async () => {
     await db.saveToCache('stale', Buffer.from('old'), 'image/png');
     raw.prepare(`UPDATE cache SET created_at = datetime('now', '-61 minutes') WHERE key = 'stale'`).run();
 
-    assert.equal(await db.getFromCache('stale'), null);
+    assert.deepEqual(await db.getFromCache('stale'), { data: Buffer.from('old'), fresh: false });
+    await db.pruneDatabase();
+    assert.equal(raw.prepare(`SELECT COUNT(*) AS n FROM cache WHERE key = 'stale'`).get().n, 1);
+
+    raw.prepare(`UPDATE cache SET created_at = datetime('now', '-25 hours') WHERE key = 'stale'`).run();
     await db.pruneDatabase();
     assert.equal(raw.prepare(`SELECT COUNT(*) AS n FROM cache WHERE key = 'stale'`).get().n, 0);
 });
@@ -75,7 +80,7 @@ test('health history only counts recent checks, whatever the time zone', async (
     const status = await db.getHealthStatus();
     assert.equal(status.recent_checks, 2);
     assert.equal(status.recent_status, 'green');
-    assert.equal(status.response_time_avg, 50);
+    assert.equal(status.external_api_latency_avg, 50);
     assert.deepEqual(status.last_24h_summary, { green: 2, red: 1 });
 });
 

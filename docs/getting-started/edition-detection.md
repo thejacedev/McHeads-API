@@ -244,7 +244,7 @@ Every other failure is reported as an error, the same way for both editions:
 |---|---|---|
 | Input doesn't match any format | 400 | `{"error": "Invalid player identifier"}` |
 | Player doesn't exist (Mojang 404/204, GeyserMC 503 "Unable to find user") | 404 | `{"error": "Player not found"}` |
-| Mojang, GeyserMC or the texture server fails or times out (5 seconds) | 502 | The endpoint's generic message, e.g. `{"error": "Failed to render head"}` |
+| Mojang, GeyserMC or the texture server fails or times out (10 seconds by default) with no older cached copy | 502 | The endpoint's generic message, e.g. `{"error": "Failed to render head"}` |
 
 ## How the API Uses Edition Internally
 

@@ -25,8 +25,10 @@ const { getCacheKey, getFromCache, saveToCache, recordStats } = require('./datab
 const { cleanParams } = require('./urlHelpers');
 const { HttpError } = require('./errors');
 
-// Matches the server-side cache lifetime.
+// Matches the server-side cache lifetime. Stale fallbacks are only cached briefly
+// so clients pick up a fresh render once the upstream recovers.
 const CACHE_CONTROL = 'public, max-age=3600';
+const STALE_CACHE_CONTROL = 'public, max-age=60';
 
 /**
  * Builds the handler for an endpoint that returns a PNG for a player.
@@ -44,24 +46,35 @@ function imageRoute({ endpoint, errorMessage, parse = () => ({}), render, header
             const options = parse(params);
             const cacheKey = getCacheKey(endpoint, player.id, ...(options.cacheParts || []));
 
-            let image = await getFromCache(cacheKey).catch(error => {
+            const cached = await getFromCache(cacheKey).catch(error => {
                 console.error('Cache read error:', error);
                 return null;
             });
 
+            let image = cached?.fresh ? cached.data : null;
+            let stale = false;
+
             if (!image) {
-                const skinInfo = await getSkinInfo(player);
-                const skin = await getSkinImage(skinInfo.skinUrl);
-                image = await render(skin, skinInfo, options);
-                saveToCache(cacheKey, image, 'image/png').catch(error => {
-                    console.error('Cache write error:', error);
-                });
+                try {
+                    const skinInfo = await getSkinInfo(player);
+                    const skin = await getSkinImage(skinInfo.skinUrl);
+                    image = await render(skin, skinInfo, options);
+                    saveToCache(cacheKey, image, 'image/png').catch(error => {
+                        console.error('Cache write error:', error);
+                    });
+                } catch (error) {
+                    // An upstream outage or timeout shouldn't break an image we've served before.
+                    if (!cached || !isUpstreamFailure(error)) throw error;
+                    console.warn(`${errorMessage}, serving stale image: ${describeError(error)}`);
+                    image = cached.data;
+                    stale = true;
+                }
             }
 
             recordStats(player.edition);
             res.set({
                 'Content-Type': 'image/png',
-                'Cache-Control': CACHE_CONTROL,
+                'Cache-Control': stale ? STALE_CACHE_CONTROL : CACHE_CONTROL,
                 ...(headers ? headers(params) : {})
             });
             res.send(image);
@@ -78,8 +91,22 @@ function sendError(res, error, errorMessage) {
         return res.status(error.status).json({ error: error.message });
     }
 
-    console.error(`${errorMessage}:`, error.cause || error);
+    console.error(`${errorMessage}: ${describeError(error)}`);
     res.status(error instanceof HttpError ? error.status : 500).json({ error: errorMessage });
+}
+
+function isUpstreamFailure(error) {
+    return error instanceof HttpError && error.status === 502;
+}
+
+// One log line per failure; for upstream errors it names the request that failed,
+// e.g. "Mojang request failed: timeout of 10000ms exceeded (GET https://...)".
+function describeError(error) {
+    const cause = error.cause;
+    if (cause?.config?.url) {
+        return `${error.message}: ${cause.message} (${(cause.config.method || 'get').toUpperCase()} ${cause.config.url})`;
+    }
+    return error.stack || String(error);
 }
 
 module.exports = { imageRoute };

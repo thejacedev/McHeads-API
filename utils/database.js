@@ -22,7 +22,10 @@
 
 const usePostgres = !!process.env.DATABASE_URL;
 
+// Cached images are fresh for CACHE_TTL. Older copies are kept until
+// CACHE_RETENTION so they can be served if an upstream API is failing.
 const CACHE_TTL = [1, 'hour'];
+const CACHE_RETENTION = [1, 'day'];
 const HEALTH_LOG_RETENTION = [7, 'days'];
 const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -128,10 +131,10 @@ async function initDatabase() {
     pruneTimer.unref();
 }
 
-// Deletes expired cache entries and old health logs so neither table grows forever.
+// Deletes old cache entries and health logs so neither table grows forever.
 async function pruneDatabase() {
     try {
-        await query(`DELETE FROM ${T.cache} WHERE created_at <= ${ago(CACHE_TTL)}`);
+        await query(`DELETE FROM ${T.cache} WHERE created_at <= ${ago(CACHE_RETENTION)}`);
         await query(`DELETE FROM ${T.health_logs} WHERE timestamp <= ${ago(HEALTH_LOG_RETENTION)}`);
     } catch (err) {
         console.error('Database prune error:', err);
@@ -142,12 +145,16 @@ function getCacheKey(endpoint, playerId, ...parts) {
     return [endpoint, playerId, ...parts].join(':');
 }
 
+// Returns { data, fresh } for a cached image, or null. `fresh` is false once the
+// entry is older than CACHE_TTL.
 async function getFromCache(key) {
     const rows = await query(
-        `SELECT data FROM ${T.cache} WHERE key = ? AND created_at > ${ago(CACHE_TTL)}`,
+        `SELECT data, CASE WHEN created_at > ${ago(CACHE_TTL)} THEN 1 ELSE 0 END AS fresh
+         FROM ${T.cache} WHERE key = ?`,
         [key]
     );
-    return rows[0]?.data || null;
+    if (!rows[0]) return null;
+    return { data: rows[0].data, fresh: Number(rows[0].fresh) === 1 };
 }
 
 async function saveToCache(key, data, contentType) {
@@ -230,7 +237,7 @@ async function getHealthStatus() {
         recent_status: recentStatus,
         recent_message: recentMessage,
         uptime: process.uptime(),
-        response_time_avg: Math.round(Number(recent.avg_response_time) || 0),
+        external_api_latency_avg: Math.round(Number(recent.avg_response_time) || 0),
         recent_checks: checks,
         last_24h_summary: Object.fromEntries(daily.map(row => [row.status, Number(row.count)]))
     };

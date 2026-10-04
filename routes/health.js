@@ -24,6 +24,7 @@ const express = require('express');
 const router = express.Router();
 const { logHealthCheck, getHealthStatus } = require('../utils/database');
 const http = require('../utils/http');
+const { responseTimeStats } = require('../utils/metrics');
 
 router.get('/health', async (req, res) => {
     const startTime = Date.now();
@@ -32,7 +33,7 @@ router.get('/health', async (req, res) => {
         let externalApiStatus = 'green';
 
         try {
-            const mojangTest = await http.get('https://api.mojang.com/users/profiles/minecraft/Notch');
+            const mojangTest = await http.get('https://api.mojang.com/users/profiles/minecraft/Notch', { timeout: 5000 });
             if (!mojangTest.data) {
                 externalApiStatus = 'yellow';
             }
@@ -56,6 +57,7 @@ router.get('/health', async (req, res) => {
         // Log first so this check counts towards the history below.
         await logHealthCheck(overallStatus, statusMessage, responseTime);
         const history = await getHealthStatus();
+        const requests = responseTimeStats();
         const memory = process.memoryUsage();
 
         res.status(overallStatus === 'red' ? 503 : 200).json({
@@ -65,6 +67,7 @@ router.get('/health', async (req, res) => {
             services: {
                 database: 'green',
                 external_apis: externalApiStatus,
+                // How long this check took, which is almost entirely the Mojang round trip.
                 response_time: `${responseTime}ms`
             },
             uptime_seconds: Math.floor(process.uptime()),
@@ -72,7 +75,11 @@ router.get('/health', async (req, res) => {
                 used: Math.round(memory.heapUsed / 1024 / 1024),
                 total: Math.round(memory.heapTotal / 1024 / 1024)
             },
-            ...history
+            ...history,
+            // How fast the API answers real requests (last 5 minutes, excluding /health).
+            response_time_avg: requests.avg,
+            response_time_p95: requests.p95,
+            requests_last_5m: requests.requests
         });
 
     } catch (error) {

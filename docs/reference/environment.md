@@ -218,6 +218,29 @@ to come from the proxy's IP and all clients share one limit.
 
 ---
 
+### UPSTREAM_TIMEOUT_MS
+
+Timeout for each request to Mojang, GeyserMC and the texture server.
+
+| Property | Value |
+| -------- | ----- |
+| **Variable** | `UPSTREAM_TIMEOUT_MS` |
+| **Type** | Integer (milliseconds) |
+| **Default** | `10000` (10 seconds) |
+| **Required** | No |
+
+```bash
+UPSTREAM_TIMEOUT_MS=8000
+```
+
+A request that takes longer is abandoned. The API then serves an older cached
+copy of the image if it has one, and otherwise returns HTTP 502. Mojang's
+session server has occasional multi-second spikes, so very low values cause
+avoidable errors. The `/health` Mojang check always uses its own 5-second
+timeout.
+
+---
+
 ### TRUST_PROXY
 
 Sets Express's `trust proxy` setting, which controls how `req.ip` (used by the
@@ -308,7 +331,8 @@ This reads the `.env` file from the current working directory and populates
 over `.env` file values.
 
 `server.js` then loads the Express app (`app.js`), which reads `TRUST_PROXY` and
-`RATE_LIMIT_PER_MINUTE`, and the database module (`utils/database.js`), which
+`RATE_LIMIT_PER_MINUTE` (and, through `utils/http.js`, `UPSTREAM_TIMEOUT_MS`),
+and the database module (`utils/database.js`), which
 reads `DATABASE_URL`, `DATABASE_SSL`, `DATABASE_CA_CERT` and `SQLITE_PATH`
 immediately on import:
 

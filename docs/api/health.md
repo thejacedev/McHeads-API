@@ -21,14 +21,14 @@ This endpoint takes no parameters.
 
 When called, the health endpoint performs the following steps:
 
-1. **Mojang API check**: A test request is made to `https://api.mojang.com/users/profiles/minecraft/Notch` using the shared HTTP client, which has a 5-second timeout.
+1. **Mojang API check**: A test request is made to `https://api.mojang.com/users/profiles/minecraft/Notch` with a 5-second timeout.
    - If the response contains data, the external API status is `green`.
    - If the response is empty, the status is `yellow`.
    - If the request fails or times out, the status is `red`.
-2. **Response time**: The time taken by the check is measured in milliseconds.
+2. **Check time**: The time taken by the check is measured in milliseconds. This is almost entirely the Mojang round trip, so it reflects Mojang's latency rather than the API's.
 3. **Live status**: `status` and `message` are determined from this check (see below).
 4. **Logging**: The result is written to the health log table *before* the history is read, so the current check counts towards the history.
-5. **Health log history**: The logged checks are summarized: `recent_status`, `recent_message`, `response_time_avg` and `recent_checks` cover the last 5 minutes, and `last_24h_summary` counts checks by status over the last 24 hours. The database connection is implicitly verified by these queries; if they succeed, `services.database` is `green`.
+5. **Health log history**: The logged checks are summarized: `recent_status`, `recent_message`, `external_api_latency_avg` and `recent_checks` cover the last 5 minutes, and `last_24h_summary` counts checks by status over the last 24 hours. The database connection is implicitly verified by these queries; if they succeed, `services.database` is `green`.
 
 ### Status Determination
 
@@ -69,12 +69,15 @@ Historical checks never override `status` or `message`; their assessment is repo
   "recent_status": "green",
   "recent_message": "All systems operational",
   "uptime": 86400.512,
-  "response_time_avg": 42,
+  "external_api_latency_avg": 42,
   "recent_checks": 5,
   "last_24h_summary": {
     "green": 1200,
     "yellow": 15
-  }
+  },
+  "response_time_avg": 6.8,
+  "response_time_p95": 24.5,
+  "requests_last_5m": 1830
 }
 ```
 
@@ -88,7 +91,7 @@ Historical checks never override `status` or `message`; their assessment is repo
 | `services` | object | Individual service health statuses |
 | `services.database` | string | Database connection status (always `"green"` if the check completes) |
 | `services.external_apis` | string | Mojang API reachability: `"green"`, `"yellow"`, or `"red"` |
-| `services.response_time` | string | Time taken to complete this health check, formatted as `"{ms}ms"` |
+| `services.response_time` | string | Time taken to complete this health check (essentially the Mojang round trip), formatted as `"{ms}ms"` |
 | `uptime_seconds` | integer | Seconds since the Node.js process started |
 | `memory_usage` | object | Current heap memory usage |
 | `memory_usage.used` | integer | Used heap memory in megabytes (rounded) |
@@ -96,9 +99,12 @@ Historical checks never override `status` or `message`; their assessment is repo
 | `recent_status` | string | Assessment of the checks logged in the last 5 minutes: `"green"`, `"yellow"`, or `"red"` (see [Recent Check Window](#recent-check-window)) |
 | `recent_message` | string | Human-readable message for `recent_status` |
 | `uptime` | number | Seconds since the Node.js process started, unrounded (`process.uptime()`) |
-| `response_time_avg` | integer | Average response time of the checks logged in the last 5 minutes, in milliseconds |
+| `external_api_latency_avg` | integer | Average duration of the health checks logged in the last 5 minutes, in milliseconds. Measures Mojang's latency from the server |
 | `recent_checks` | integer | Number of health checks logged in the last 5 minutes, including this one |
 | `last_24h_summary` | object | Number of checks logged in the last 24 hours, keyed by status. Statuses with no checks are omitted |
+| `response_time_avg` | number | Average time the API took to answer real requests in the last 5 minutes (all endpoints except `/health`), in milliseconds with one decimal. `0` when there were no requests. Tracked in memory per process |
+| `response_time_p95` | number | 95th percentile of the same requests, in milliseconds |
+| `requests_last_5m` | integer | Number of requests those figures are based on |
 
 ### Response Shape (Degraded)
 
@@ -122,12 +128,15 @@ When the Mojang check takes more than 2 seconds (or returns no data, in which ca
   "recent_status": "yellow",
   "recent_message": "Some services experiencing issues",
   "uptime": 86400.512,
-  "response_time_avg": 1800,
+  "external_api_latency_avg": 1800,
   "recent_checks": 5,
   "last_24h_summary": {
     "green": 1100,
     "yellow": 115
-  }
+  },
+  "response_time_avg": 38.2,
+  "response_time_p95": 410.7,
+  "requests_last_5m": 1610
 }
 ```
 
@@ -153,13 +162,16 @@ When the Mojang API is unreachable:
   "recent_status": "red",
   "recent_message": "Multiple service errors detected",
   "uptime": 86400.512,
-  "response_time_avg": 4500,
+  "external_api_latency_avg": 4500,
   "recent_checks": 5,
   "last_24h_summary": {
     "green": 900,
     "yellow": 100,
     "red": 215
-  }
+  },
+  "response_time_avg": 41.9,
+  "response_time_p95": 512.3,
+  "requests_last_5m": 1544
 }
 ```
 

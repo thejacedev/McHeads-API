@@ -191,7 +191,7 @@ If the Mojang API is unreachable or returns an error:
 - **Cached responses** are still served normally. The 1-hour cache means most
   popular players will continue to work even during an outage.
 - **Uncached requests** will return a `502` error with the endpoint's generic
-  message once the upstream request fails or times out (after 5 seconds):
+  message once the upstream request fails or times out (after 10 seconds by default), unless an older cached copy of the image exists:
   ```json
   { "error": "Failed to render head" }
   ```

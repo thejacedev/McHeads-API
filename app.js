@@ -25,6 +25,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('./utils/rateLimit');
+const { trackResponseTime } = require('./utils/metrics');
 
 const app = express();
 
@@ -38,6 +39,7 @@ if (process.env.TRUST_PROXY) {
 app.use(helmet({crossOriginResourcePolicy: { policy: "cross-origin" }}));
 app.use(compression());
 app.use(cors());
+app.use(trackResponseTime);
 
 const rateLimitPerMinute = parseInt(process.env.RATE_LIMIT_PER_MINUTE, 10);
 if (rateLimitPerMinute > 0) {

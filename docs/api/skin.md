@@ -24,7 +24,7 @@ The `input` parameter automatically has any trailing `.png` suffix stripped befo
 ## How It Works
 
 1. The player profile is resolved via Mojang (Java) or GeyserMC (Bedrock) to obtain the skin texture URL. If the player has no custom skin, the default skin's URL is used.
-2. The skin image is fetched from the texture URL as raw binary data (`getSkinImage`, using the shared HTTP client with a 5-second timeout). Downloaded skins are kept in an in-memory cache for 24 hours, keyed by texture URL.
+2. The skin image is fetched from the texture URL as raw binary data (`getSkinImage`, using the shared HTTP client with a 10-second default timeout). Downloaded skins are kept in an in-memory cache for 24 hours, keyed by texture URL.
 3. The raw bytes are returned directly to the client with no image processing applied.
 
 ### Skin Texture Format

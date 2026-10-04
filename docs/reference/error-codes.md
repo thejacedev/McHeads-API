@@ -160,7 +160,8 @@ disabled by default; see [Environment Variables](environment.md#rate_limit_per_m
 
 **Endpoints:** all image endpoints
 
-Returned with the endpoint's generic message when an upstream service fails:
+Returned with the endpoint's generic message when an upstream service fails
+and there is no older cached copy of the image to fall back on:
 
 ```json
 { "error": "Failed to render head" }
@@ -170,14 +171,21 @@ Causes:
 - The Mojang API, Mojang session server, GeyserMC API or texture server is
   unreachable or answers with an unexpected status (for example a 500, or a
   429 when Mojang is rate limiting the server).
-- An upstream request takes longer than 5 seconds (the shared HTTP client's
-  timeout). A Java username lookup makes up to three requests (name to UUID,
-  profile, texture), each with its own timeout.
+- An upstream request takes longer than the shared HTTP client's timeout
+  (10 seconds by default, `UPSTREAM_TIMEOUT_MS`). A Java username lookup makes
+  up to three requests (name to UUID, profile, texture), each with its own
+  timeout.
 - An upstream response is larger than 1 MB.
 - GeyserMC answers 503 for any reason other than "Unable to find user".
 
+If the database still holds an image for the same request that is older than
+the 1-hour TTL (entries are kept for 24 hours), that image is served instead
+with `Cache-Control: public, max-age=60`; see
+[Caching](../rendering/caching.md#stale-fallback).
+
 Failed lookups are not cached, so the next request retries the upstream
-service.
+service. Each failure is logged on one line naming the request, for example
+`Failed to render head: Mojang request failed: timeout of 10000ms exceeded (GET https://api.mojang.com/users/profiles/minecraft/Notch)`.
 
 ---
 

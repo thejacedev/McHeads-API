@@ -23,9 +23,10 @@
 const axios = require('axios');
 
 // Shared client for all upstream requests (Mojang, GeyserMC, texture server),
-// so a hung upstream can't hold requests open indefinitely.
+// so a hung upstream can't hold requests open indefinitely. Mojang's session
+// server has occasional multi-second spikes, so the default leaves headroom.
 const http = axios.create({
-    timeout: 5000,
+    timeout: parseInt(process.env.UPSTREAM_TIMEOUT_MS, 10) || 10000,
     maxContentLength: 1024 * 1024
 });
 

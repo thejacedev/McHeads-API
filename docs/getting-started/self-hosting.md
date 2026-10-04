@@ -78,6 +78,7 @@ cp .env.example .env
 | `DATABASE_CA_CERT` | _(none)_ | Path to a CA certificate file. When set, the PostgreSQL server certificate is verified against this CA |
 | `SQLITE_PATH` | `./new_minecraft_heads.db` | SQLite database file, used when `DATABASE_URL` is not set |
 | `RATE_LIMIT_PER_MINUTE` | _(none)_ | Per-IP request limit per minute (in-memory, fixed window). Unset or `0` disables rate limiting |
+| `UPSTREAM_TIMEOUT_MS` | `10000` | Timeout per request to Mojang, GeyserMC and the texture server. On timeout an older cached image is served if available, otherwise 502 |
 | `TRUST_PROXY` | _(none)_ | Express `trust proxy` setting: `true`, a hop count (e.g. `1`), or trusted addresses. Set it behind a reverse proxy |
 
 See [Environment Variables](../reference/environment.md) for full details.

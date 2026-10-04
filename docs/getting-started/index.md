@@ -63,7 +63,7 @@ The rendering process follows these steps:
 
 2. **Cache lookup** -- The API checks the database for a cached render matching the endpoint, normalized player, size, and options. If a valid cache entry exists (less than 1 hour old), it is returned immediately. Cache hits skip all network requests and image processing, making them very fast.
 
-3. **Profile resolution** -- For cache misses, the API resolves the player to a skin URL and model (classic or slim) from the appropriate upstream service. For Java players, a username is first resolved to a UUID via `api.mojang.com`, then the session profile (which contains the skin URL) is fetched from `sessionserver.mojang.com`. For Bedrock players, the GeyserMC API at `api.geysermc.org` handles both gamertag-to-XUID resolution and skin data retrieval. Lookups are cached in memory for 10 minutes. Unknown players get a 404, and upstream failures or timeouts (5 seconds per request) get a 502.
+3. **Profile resolution** -- For cache misses, the API resolves the player to a skin URL and model (classic or slim) from the appropriate upstream service. For Java players, a username is first resolved to a UUID via `api.mojang.com`, then the session profile (which contains the skin URL) is fetched from `sessionserver.mojang.com`. For Bedrock players, the GeyserMC API at `api.geysermc.org` handles both gamertag-to-XUID resolution and skin data retrieval. Lookups are cached in memory for 10 minutes. Unknown players get a 404, and upstream failures or timeouts (10 seconds per request by default) get a 502, unless an older cached render can be served instead.
 
 4. **Image rendering** -- The raw skin texture is downloaded from the resolved URL (and cached in memory for 24 hours) and processed into the requested render type. The skin texture is a standard Minecraft skin format -- either 64x64 pixels (new format, used since Minecraft 1.8) or 64x32 pixels (legacy format). Each body part occupies a specific region of this texture, and the rendering code crops, scales, and composites these regions according to the requested output.
 
@@ -162,7 +162,8 @@ utils/
     imageRoute.js       Shared handler used by every image endpoint
     database.js         SQLite/PostgreSQL abstraction, caching, stats, health logs
     memoryCache.js      In-memory TTL cache for player lookups and skin textures
-    http.js             Shared axios client for upstream requests (5-second timeout)
+    metrics.js          Rolling request-latency stats reported by /health
+    http.js             Shared axios client for upstream requests (10-second default timeout)
     rateLimit.js        Optional per-IP rate limiter
     errors.js           HttpError class (errors that map to an HTTP status)
     mhfHeads.js         MHF UUID-to-name mappings

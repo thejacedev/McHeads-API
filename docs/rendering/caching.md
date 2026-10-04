@@ -181,21 +181,24 @@ Send PNG with Content-Type: image/png
 ```js
 async function getFromCache(key) {
     const rows = await query(
-        `SELECT data FROM ${T.cache} WHERE key = ? AND created_at > ${ago(CACHE_TTL)}`,
+        `SELECT data, CASE WHEN created_at > ${ago(CACHE_TTL)} THEN 1 ELSE 0 END AS fresh
+         FROM ${T.cache} WHERE key = ?`,
         [key]
     );
-    return rows[0]?.data || null;
+    if (!rows[0]) return null;
+    return { data: rows[0].data, fresh: Number(rows[0].fresh) === 1 };
 }
 ```
 
-The lookup filters by both the key and the `created_at` timestamp. The 1-hour
+The lookup returns the cached image and whether it is still fresh. The 1-hour
 cutoff is computed in SQL with the database's own clock, in the same clock and
 format that `CURRENT_TIMESTAMP` uses when the row is written:
 
 - SQLite: `datetime('now', '-1 hour')`
 - PostgreSQL: `NOW() - INTERVAL '1 hour'`
 
-An entry older than 1 hour is treated as a miss.
+A fresh entry is served immediately. An entry older than 1 hour is re-rendered,
+but the old image is kept as a fallback (see [Stale Fallback](#stale-fallback)).
 
 > Earlier versions compared `created_at` with an ISO 8601 timestamp generated in
 > JavaScript. SQLite stores `CURRENT_TIMESTAMP` as `YYYY-MM-DD HH:MM:SS` text, so
@@ -219,6 +222,20 @@ The same `ON CONFLICT (key) DO UPDATE` upsert is used on both SQLite and
 PostgreSQL, so a re-rendered entry overwrites the old row in place instead of
 accumulating duplicate rows.
 
+### Stale Fallback
+
+When an entry is older than 1 hour, the API re-renders it. If that fails because
+an upstream service (Mojang, GeyserMC or the texture server) returned an error or
+timed out, the API serves the old image instead of a 502:
+
+- The response is `200` with `Cache-Control: public, max-age=60`, so clients ask
+  again soon and pick up a fresh render once the upstream recovers.
+- The server logs one line such as
+  `Failed to render head, serving stale image: Mojang request failed: timeout of 10000ms exceeded (GET https://...)`.
+- Players that were never cached (or whose entry was pruned) still get a 502.
+
+Upstream timeouts default to 10 seconds per request (`UPSTREAM_TIMEOUT_MS`).
+
 ### Cache Errors
 
 Cache read and write errors never fail a request. A failed read is logged as
@@ -230,13 +247,14 @@ write is logged as `Cache write error:` and the rendered image is still sent.
 ## TTL and Expiration
 
 The cache TTL is **1 hour**, defined as `CACHE_TTL` in `utils/database.js` and
-evaluated in SQL on every lookup. Expired rows are deleted by `pruneDatabase`,
-which runs once at startup and then every 10 minutes:
+evaluated in SQL on every lookup. Rows are kept for **24 hours**
+(`CACHE_RETENTION`) so they can serve as a stale fallback, then deleted by
+`pruneDatabase`, which runs once at startup and then every 10 minutes:
 
 ```js
 async function pruneDatabase() {
     try {
-        await query(`DELETE FROM ${T.cache} WHERE created_at <= ${ago(CACHE_TTL)}`);
+        await query(`DELETE FROM ${T.cache} WHERE created_at <= ${ago(CACHE_RETENTION)}`);
         await query(`DELETE FROM ${T.health_logs} WHERE timestamp <= ${ago(HEALTH_LOG_RETENTION)}`);
     } catch (err) {
         console.error('Database prune error:', err);
@@ -246,8 +264,8 @@ async function pruneDatabase() {
 
 This means:
 
-- **Stale entries don't accumulate** -- keys that were requested once and never
-  again are removed within about 10 minutes of expiring.
+- **Old entries don't accumulate** -- keys that were requested once and never
+  again are removed within about 10 minutes of turning 24 hours old.
 - **Concurrent misses still render independently** -- if a popular key expires
   and many requests arrive at once, each one misses the database cache and
   renders. The in-memory caches below make sure they share a single player
@@ -337,7 +355,7 @@ CREATE TABLE IF NOT EXISTS health_logs (
 
 Health logs older than **7 days** are deleted by the same `pruneDatabase` job,
 at startup and every 10 minutes. The health endpoint summarizes the logs from
-the last 5 minutes (`recent_status`, `response_time_avg`, `recent_checks`) and
+the last 5 minutes (`recent_status`, `external_api_latency_avg`, `recent_checks`) and
 counts them by status over the last 24 hours (`last_24h_summary`).
 
 ---
