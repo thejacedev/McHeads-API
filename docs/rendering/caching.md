@@ -163,7 +163,7 @@ getFromCache(key)   (errors are logged and treated as a miss)
     |
     +-- HIT: use the cached PNG
     |
-    +-- MISS: getSkinInfo(player)      (in-memory, 10 min; 404 / 502 on failure)
+    +-- MISS: getSkinInfo(player)      (in-memory, 30 min; 404 / 502 on failure)
     |         getSkinImage(skinUrl)    (in-memory, 24 h; 502 on failure)
     |         render(skin, ...)        (Sharp / Canvas)
     |         saveToCache(key, png)    (not awaited; errors are logged)
@@ -280,7 +280,7 @@ of the upstream services:
 
 | Cache | Key | Value | TTL | Max entries |
 | ----- | --- | ----- | --- | ----------- |
-| Player lookups | normalized player ID | `{ skinUrl, slim }` | 10 minutes | 5000 |
+| Player lookups | normalized player ID | `{ skinUrl, slim }` | 30 minutes | 20000 |
 | Skin textures | texture URL | skin PNG buffer | 24 hours | 500 |
 
 They store promises, so concurrent requests for the same player or texture
@@ -291,7 +291,7 @@ first.
 
 Texture URLs are content-addressed (a changed skin gets a new URL), so a cached
 skin PNG never goes stale. The player lookup cache means a skin change can take
-up to 10 minutes to be picked up by renders that miss the database cache.
+up to 30 minutes to be picked up by renders that miss the database cache.
 
 These caches live in the Node.js process, so they are empty after a restart and
 are not shared between multiple API instances.

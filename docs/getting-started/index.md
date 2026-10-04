@@ -63,7 +63,7 @@ The rendering process follows these steps:
 
 2. **Cache lookup** -- The API checks the database for a cached render matching the endpoint, normalized player, size, and options. If a valid cache entry exists (less than 1 hour old), it is returned immediately. Cache hits skip all network requests and image processing, making them very fast.
 
-3. **Profile resolution** -- For cache misses, the API resolves the player to a skin URL and model (classic or slim) from the appropriate upstream service. For Java players, a username is first resolved to a UUID via `api.mojang.com`, then the session profile (which contains the skin URL) is fetched from `sessionserver.mojang.com`. For Bedrock players, the GeyserMC API at `api.geysermc.org` handles both gamertag-to-XUID resolution and skin data retrieval. Lookups are cached in memory for 10 minutes. Unknown players get a 404, and upstream failures or timeouts (10 seconds per request by default) get a 502, unless an older cached render can be served instead.
+3. **Profile resolution** -- For cache misses, the API resolves the player to a skin URL and model (classic or slim) from the appropriate upstream service. For Java players, a username is first resolved to a UUID via `api.mojang.com`, then the session profile (which contains the skin URL) is fetched from `sessionserver.mojang.com`. For Bedrock players, the GeyserMC API at `api.geysermc.org` handles both gamertag-to-XUID resolution and skin data retrieval. Lookups are cached in memory for 30 minutes. Unknown players get a 404, and upstream failures or timeouts (10 seconds per request by default) get a 502, unless an older cached render can be served instead.
 
 4. **Image rendering** -- The raw skin texture is downloaded from the resolved URL (and cached in memory for 24 hours) and processed into the requested render type. The skin texture is a standard Minecraft skin format -- either 64x64 pixels (new format, used since Minecraft 1.8) or 64x32 pixels (legacy format). Each body part occupies a specific region of this texture, and the rendering code crops, scales, and composites these regions according to the requested output.
 
@@ -91,7 +91,7 @@ All renders are cached for **1 hour** in the configured database. The cache key 
 
 The lookup query only returns entries whose `created_at` is within the last hour, evaluated with the database's own clock. Expired rows are deleted at startup and every 10 minutes. When the same key is rendered again, the new render overwrites the old row with an `ON CONFLICT (key) DO UPDATE` upsert.
 
-Separately from the database, the API keeps two in-memory caches: player lookups (10 minutes) and downloaded skin textures (24 hours). See [Caching](../rendering/caching.md) for details.
+Separately from the database, the API keeps two in-memory caches: player lookups (30 minutes) and downloaded skin textures (24 hours). See [Caching](../rendering/caching.md) for details.
 
 The database backend is configurable. By default, the API uses a local SQLite file (`new_minecraft_heads.db`, or the path in `SQLITE_PATH`). For production deployments, you can set the `DATABASE_URL` environment variable to use PostgreSQL instead. See the [Self-Hosting](self-hosting.md) guide for database configuration details.
 

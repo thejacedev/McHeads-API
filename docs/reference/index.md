@@ -47,7 +47,7 @@ settings, rate limiting, and reverse proxy configuration.
 | Hat overlay region | 8x8 pixels at (40, 8) |
 | Java API | api.mojang.com + sessionserver.mojang.com |
 | Bedrock API | api.geysermc.org/v2 |
-| Cache TTL | 1 hour fresh, kept 24 h as a fallback (database), plus in-memory player (10 min) and skin (24 h) caches |
+| Cache TTL | 1 hour fresh, kept 24 h as a fallback (database), plus in-memory player (30 min) and skin (24 h) caches |
 | Size range | 8–512 px (default 128, or 64 for `/ioshead` and `/iosbody`) |
 | Upstream timeout | 10 seconds per request (`UPSTREAM_TIMEOUT_MS`) |
 | Default port | 3005 |

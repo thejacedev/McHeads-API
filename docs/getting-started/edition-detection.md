@@ -252,7 +252,7 @@ Once the edition is detected, it is passed through the render pipeline for two p
 
 ### 1. Profile Resolution
 
-The `getSkinInfo` function routes to the correct upstream API and returns `{ skinUrl, slim }`. Results are kept in an in-memory cache for 10 minutes, keyed by the normalized player `id`:
+The `getSkinInfo` function routes to the correct upstream API and returns `{ skinUrl, slim }`. Results are kept in an in-memory cache for 30 minutes, keyed by the normalized player `id`:
 
 ```javascript
 function getSkinInfo(player) {

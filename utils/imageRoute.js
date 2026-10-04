@@ -106,6 +106,7 @@ function describeError(error) {
     if (cause?.config?.url) {
         return `${error.message}: ${cause.message} (${(cause.config.method || 'get').toUpperCase()} ${cause.config.url})`;
     }
+    if (error instanceof HttpError) return error.message;
     return error.stack || String(error);
 }
 

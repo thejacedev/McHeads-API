@@ -8,7 +8,7 @@ delete process.env.RATE_LIMIT_PER_MINUTE;
 const { createCanvas } = require('canvas');
 const http = require('../utils/http');
 
-// Routes upstream GETs to handler(url), which returns { status, data } (or
+// Routes upstream GETs to handler(url), which returns { status, data, headers } (or
 // nothing for a 404) and may throw to simulate a network failure. Mirrors axios'
 // validateStatus behaviour. Returns the list of requested URLs.
 function stubUpstream(handler) {
@@ -23,14 +23,14 @@ function stubUpstream(handler) {
             error.config = request;
             throw error;
         }
-        const { status = 200, data } = result || { status: 404 };
+        const { status = 200, data, headers = {} } = result || { status: 404 };
         const accepted = config.validateStatus
             ? config.validateStatus(status)
             : status >= 200 && status < 300;
         if (!accepted) {
             const error = new Error(`Request failed with status code ${status}`);
             error.config = request;
-            error.response = { status, data };
+            error.response = { status, data, headers };
             throw error;
         }
         return { status, data };

@@ -85,8 +85,8 @@ for the same key triggers a fresh render and updates the cache.
 
 The cache lives in either **SQLite** (default, stored in
 `new_minecraft_heads.db` or `SQLITE_PATH`) or **PostgreSQL** (when `DATABASE_URL`
-is set). Expired entries are ignored on lookup and deleted at startup and every
-10 minutes. Player lookups (10 minutes) and downloaded skin textures (24 hours)
+is set). Entries older than an hour are re-rendered (and kept for 24 hours as a fallback
+when upstream APIs fail). Player lookups (30 minutes) and downloaded skin textures (24 hours)
 are also cached in memory.
 
 ---

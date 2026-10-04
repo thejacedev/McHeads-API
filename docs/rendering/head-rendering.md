@@ -145,7 +145,7 @@ Head rendering is the lightest operation in the API:
 
 - **One HTTP request** to download the skin texture (or zero if the skin is
   already in the in-memory skin cache), after the player lookup (which is itself
-  cached in memory for 10 minutes).
+  cached in memory for 30 minutes).
 - **Two Sharp operations** (extract + resize), or three if the hat layer is
   included.
 - **No Canvas overhead** -- Sharp's libvips backend is implemented in

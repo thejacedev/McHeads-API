@@ -170,7 +170,9 @@ and there is no older cached copy of the image to fall back on:
 Causes:
 - The Mojang API, Mojang session server, GeyserMC API or texture server is
   unreachable or answers with an unexpected status (for example a 500, or a
-  429 when Mojang is rate limiting the server).
+  429 when Mojang is rate limiting the server). After a 429, requests to that
+  host are paused for its `Retry-After` time (30 seconds by default) and fail
+  immediately with `<host> is rate limiting us, retrying in Ns` in the log.
 - An upstream request takes longer than the shared HTTP client's timeout
   (10 seconds by default, `UPSTREAM_TIMEOUT_MS`). A Java username lookup makes
   up to three requests (name to UUID, profile, texture), each with its own

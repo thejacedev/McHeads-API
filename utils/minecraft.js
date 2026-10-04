@@ -39,10 +39,17 @@ const PREFIXED_XUID_RE = /^0000\d{13,}$/;
 // GeyserMC rejects gamertags longer than 16 characters.
 const GAMERTAG_RE = /^[\p{L}\p{N}][\p{L}\p{N} _#-]{0,15}$/u;
 
-// Profile lookups are cheap to repeat but rate limited upstream; texture URLs
-// are content-addressed, so a downloaded skin never changes.
-const profileCache = new TtlCache({ ttlMs: 10 * 60 * 1000, maxEntries: 5000 });
+// Profile lookups are rate limited upstream, so they're kept for a while; texture
+// URLs are content-addressed, so a downloaded skin never changes.
+const profileCache = new TtlCache({ ttlMs: 30 * 60 * 1000, maxEntries: 20000 });
 const skinCache = new TtlCache({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 500 });
+
+// Hosts that answered 429, mapped to when they may be called again. Calling a
+// rate-limited API only keeps the limit in place, so until then requests fail
+// fast (and the route falls back to cached images).
+const cooldowns = new Map();
+const DEFAULT_COOLDOWN_MS = 30 * 1000;
+const MAX_COOLDOWN_MS = 5 * 60 * 1000;
 
 function isUUID(input) {
     return UUID_RE.test(input) || SHORT_UUID_RE.test(input);
@@ -97,9 +104,30 @@ function parseTextures(value) {
     };
 }
 
+// GET through the shared client, honouring and starting rate-limit cooldowns.
+async function upstreamGet(url, config) {
+    const { host } = new URL(url);
+    const until = cooldowns.get(host) || 0;
+    if (until > Date.now()) {
+        throw new HttpError(502, `${host} is rate limiting us, retrying in ${Math.ceil((until - Date.now()) / 1000)}s`);
+    }
+
+    try {
+        return await http.get(url, config);
+    } catch (error) {
+        if (error.response?.status === 429) {
+            const retryAfter = Number(error.response.headers?.['retry-after']);
+            const ms = retryAfter > 0 ? Math.min(retryAfter * 1000, MAX_COOLDOWN_MS) : DEFAULT_COOLDOWN_MS;
+            cooldowns.set(host, Date.now() + ms);
+            console.warn(`${host} answered 429; pausing requests to it for ${Math.round(ms / 1000)}s`);
+        }
+        throw error;
+    }
+}
+
 // GETs JSON, resolving to null when the upstream answers with one of notFound.
 async function getJson(url, notFound = []) {
-    const response = await http.get(url, {
+    const response = await upstreamGet(url, {
         validateStatus: status => status === 200 || notFound.includes(status)
     });
     return response.status === 200 ? response.data : null;
@@ -174,7 +202,7 @@ function getSkinInfo(player) {
 function getSkinImage(skinUrl) {
     return skinCache.getOrLoad(skinUrl, async () => {
         try {
-            const response = await http.get(skinUrl, { responseType: 'arraybuffer' });
+            const response = await upstreamGet(skinUrl, { responseType: 'arraybuffer' });
             return Buffer.from(response.data);
         } catch (error) {
             throw upstreamError('Texture server', error);

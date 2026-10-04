@@ -12,7 +12,7 @@ API; Bedrock Edition players are resolved through the GeyserMC API.
 
 All upstream requests go through a shared axios client (`utils/http.js`) with a
 10-second default timeout (`UPSTREAM_TIMEOUT_MS`) and a 1 MB response size limit. The resolved `{ skinUrl, slim }`
-for each player is cached in memory for 10 minutes, and downloaded skin PNGs are
+for each player is cached in memory for 30 minutes, and downloaded skin PNGs are
 cached in memory for 24 hours, keyed by texture URL. Concurrent requests for the
 same player or texture share one in-flight lookup, and failed lookups are not
 cached.
@@ -298,7 +298,17 @@ per IP. The session server endpoint is less restrictive.
 The Minecraft Heads API's caches mitigate this: once a render is cached,
 subsequent requests for that player and size combination are served from the
 database for 1 hour without touching Mojang at all, and the resolved skin URL
-is reused from memory for 10 minutes across all endpoints and sizes.
+is reused from memory for 30 minutes across all endpoints and sizes.
+
+When an upstream host answers **HTTP 429**, the API pauses all requests to that
+host for the time given in its `Retry-After` header (30 seconds if there is
+none, at most 5 minutes) and logs
+`api.mojang.com answered 429; pausing requests to it for 30s`. Calling a
+rate-limited API again would only keep the limit in place. During the pause,
+lookups that need that host fail immediately, so the endpoint serves an older
+cached render if it has one and otherwise returns 502. Each host is tracked
+separately, so a limit on `api.mojang.com` (username lookups) doesn't block
+UUID lookups on `sessionserver.mojang.com`.
 
 The GeyserMC API has its own rate limits. Check the GeyserMC documentation for
 current thresholds.
