@@ -194,7 +194,7 @@ GET textures.minecraft.net/texture/{hash}
     v
 Raw skin PNG buffer --> rendering pipeline
 
-Any upstream error or timeout --> stale cached image if one exists, else HTTP 502
+Any upstream error or timeout --> last render if one exists, else the default skin (/download: HTTP 502)
 ```
 
 ---
@@ -281,7 +281,7 @@ a 502, exactly as for Java players.
 | Username does not exist (Java) | Mojang returns 404 or 204; API returns 404 `Player not found` |
 | UUID does not exist (Java) | Session server returns 404 or 204; API returns 404 `Player not found` |
 | Java player has no custom skin | No `SKIN` texture in the profile; default skin is used |
-| Mojang API down or slow | Request fails or times out after 10 seconds; the API serves an older cached render if it has one, otherwise 502 with the endpoint's generic message |
+| Mojang API down or slow | Request fails or times out after 10 seconds; the API serves the last render if it has one, otherwise an image of the default skin (`/download` returns 502) |
 | Gamertag unknown to GeyserMC (Bedrock) | GeyserMC returns 503 "Unable to find user"; API returns 404 `Player not found` |
 | GeyserMC API down (Bedrock) | API returns 502 with the endpoint's generic message |
 | Bedrock player has no skin | GeyserMC returns `{}`; default skin is used |
@@ -306,7 +306,7 @@ none, at most 5 minutes) and logs
 `api.mojang.com answered 429; pausing requests to it for 30s`. Calling a
 rate-limited API again would only keep the limit in place. During the pause,
 lookups that need that host fail immediately, so the endpoint serves an older
-cached render if it has one and otherwise returns 502. Each host is tracked
+cached render if it has one and otherwise renders the default skin. Each host is tracked
 separately, so a limit on `api.mojang.com` (username lookups) doesn't block
 UUID lookups on `sessionserver.mojang.com`.
 

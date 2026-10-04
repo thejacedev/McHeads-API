@@ -28,6 +28,8 @@ router.get('/download/:input', imageRoute({
     endpoint: 'skin', // same bytes as /skin, so share its cache entries
     errorMessage: 'Failed to download skin',
     render: skin => skin,
+    // A download should be the player's real skin, never a stand-in.
+    defaultOnFailure: false,
     headers: ({ input }) => ({
         'Content-Disposition': `attachment; filename="${input.replace(/[^A-Za-z0-9_-]/g, '_')}_skin.png"`
     })

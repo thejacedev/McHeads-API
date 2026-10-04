@@ -20,15 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-const { parsePlayer, getSkinInfo, getSkinImage } = require('./minecraft');
+const { parsePlayer, getSkinInfo, getSkinImage, DEFAULT_SKIN } = require('./minecraft');
 const { getCacheKey, getFromCache, saveToCache, recordStats } = require('./database');
 const { cleanParams } = require('./urlHelpers');
 const { HttpError } = require('./errors');
 
-// Matches the server-side cache lifetime. Stale fallbacks are only cached briefly
-// so clients pick up a fresh render once the upstream recovers.
+// Matches the server-side cache lifetime. Fallback images (a stale render or the
+// default skin) are only cached briefly so clients pick up a fresh render once
+// the upstream recovers.
 const CACHE_CONTROL = 'public, max-age=3600';
-const STALE_CACHE_CONTROL = 'public, max-age=60';
+const FALLBACK_CACHE_CONTROL = 'public, max-age=60';
 
 /**
  * Builds the handler for an endpoint that returns a PNG for a player.
@@ -37,8 +38,10 @@ const STALE_CACHE_CONTROL = 'public, max-age=60';
  *                                  render options, plus `cacheParts` for the cache key
  *   render(skin, skinInfo, opts)   turns the skin PNG into the response PNG
  *   headers(params)                optional extra response headers
+ *   defaultOnFailure               if an upstream fails and nothing is cached, render
+ *                                  the default skin instead of answering 502
  */
-function imageRoute({ endpoint, errorMessage, parse = () => ({}), render, headers }) {
+function imageRoute({ endpoint, errorMessage, parse = () => ({}), render, headers, defaultOnFailure = true }) {
     return async (req, res) => {
         try {
             const params = cleanParams(req.params);
@@ -52,7 +55,7 @@ function imageRoute({ endpoint, errorMessage, parse = () => ({}), render, header
             });
 
             let image = cached?.fresh ? cached.data : null;
-            let stale = false;
+            let fallback = false;
 
             if (!image) {
                 try {
@@ -63,18 +66,31 @@ function imageRoute({ endpoint, errorMessage, parse = () => ({}), render, header
                         console.error('Cache write error:', error);
                     });
                 } catch (error) {
-                    // An upstream outage or timeout shouldn't break an image we've served before.
-                    if (!cached || !isUpstreamFailure(error)) throw error;
-                    console.warn(`${errorMessage}, serving stale image: ${describeError(error)}`);
-                    image = cached.data;
-                    stale = true;
+                    // An upstream outage, timeout or rate limit shouldn't leave a broken image:
+                    // serve the last render, or the default skin for a player we've never
+                    // rendered. Neither is written to the cache.
+                    if (!isUpstreamFailure(error)) throw error;
+                    if (cached) {
+                        console.warn(`${errorMessage}, serving stale image: ${describeError(error)}`);
+                        image = cached.data;
+                    } else if (defaultOnFailure) {
+                        console.warn(`${errorMessage}, serving default skin: ${describeError(error)}`);
+                        try {
+                            image = await render(await getSkinImage(DEFAULT_SKIN.skinUrl), DEFAULT_SKIN, options);
+                        } catch {
+                            throw error;
+                        }
+                    } else {
+                        throw error;
+                    }
+                    fallback = true;
                 }
             }
 
             recordStats(player.edition);
             res.set({
                 'Content-Type': 'image/png',
-                'Cache-Control': stale ? STALE_CACHE_CONTROL : CACHE_CONTROL,
+                'Cache-Control': fallback ? FALLBACK_CACHE_CONTROL : CACHE_CONTROL,
                 ...(headers ? headers(params) : {})
             });
             res.send(image);

@@ -224,15 +224,23 @@ accumulating duplicate rows.
 
 ### Stale Fallback
 
-When an entry is older than 1 hour, the API re-renders it. If that fails because
-an upstream service (Mojang, GeyserMC or the texture server) returned an error or
-timed out, the API serves the old image instead of a 502:
+When an entry is older than 1 hour (or missing), the API renders it. If that
+fails because an upstream service (Mojang, GeyserMC or the texture server)
+returned an error, timed out or is rate limiting the server, the API serves a
+fallback image instead of a 502:
 
+- If an older render exists, that image is served.
 - The response is `200` with `Cache-Control: public, max-age=60`, so clients ask
   again soon and pick up a fresh render once the upstream recovers.
 - The server logs one line such as
   `Failed to render head, serving stale image: Mojang request failed: timeout of 10000ms exceeded (GET https://...)`.
-- Players that were never cached (or whose entry was pruned) still get a 502.
+- Players that were never cached (or whose entry was pruned) get an image
+  rendered from the default Steve skin instead, with the same short
+  `Cache-Control` and the log line `..., serving default skin: ...`. Neither
+  fallback is written to the cache, so the real render replaces it as soon as
+  the upstream answers again.
+- `/download` is the exception: it never substitutes the default skin, so
+  without a cached copy it returns 502.
 
 Upstream timeouts default to 10 seconds per request (`UPSTREAM_TIMEOUT_MS`).
 

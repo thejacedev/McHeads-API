@@ -209,7 +209,7 @@ Content-Type: application/json
 }
 ```
 
-HTTP 502 is returned when Mojang, GeyserMC or the texture server fails or doesn't answer within 10 seconds (`UPSTREAM_TIMEOUT_MS`) and no older cached copy of the render exists. Any other failure, such as the canvas rendering failing, returns the same message with HTTP 500.
+When Mojang, GeyserMC or the texture server fails or doesn't answer within 10 seconds (`UPSTREAM_TIMEOUT_MS`), the endpoint answers 200 with the last render or, for a player it has never rendered, the default skin (`Cache-Control: public, max-age=60`). HTTP 502 is only returned if even that fallback can't be rendered. Any other failure, such as the canvas rendering failing, returns the same message with HTTP 500.
 
 ## Caching
 

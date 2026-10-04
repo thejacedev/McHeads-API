@@ -161,10 +161,12 @@ disabled by default; see [Environment Variables](environment.md#rate_limit_per_m
 **Endpoints:** all image endpoints
 
 Returned with the endpoint's generic message when an upstream service fails
-and there is no older cached copy of the image to fall back on:
+and no fallback image can be served. In practice that means `/download`
+(which never substitutes another skin) without a cached copy, or a failure
+while rendering the default skin itself:
 
 ```json
-{ "error": "Failed to render head" }
+{ "error": "Failed to download skin" }
 ```
 
 Causes:
@@ -180,9 +182,10 @@ Causes:
 - An upstream response is larger than 1 MB.
 - GeyserMC answers 503 for any reason other than "Unable to find user".
 
-If the database still holds an image for the same request that is older than
-the 1-hour TTL (entries are kept for 24 hours), that image is served instead
-with `Cache-Control: public, max-age=60`; see
+Other image endpoints answer `200` with a fallback image and
+`Cache-Control: public, max-age=60`: the last render of the same request if the
+database still has one (entries are kept for 24 hours), otherwise the image
+rendered from the default Steve skin. See
 [Caching](../rendering/caching.md#stale-fallback).
 
 Failed lookups are not cached, so the next request retries the upstream

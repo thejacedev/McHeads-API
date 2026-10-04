@@ -190,10 +190,13 @@ If the Mojang API is unreachable or returns an error:
 
 - **Cached responses** are still served normally. The 1-hour cache means most
   popular players will continue to work even during an outage.
-- **Uncached requests** will return a `502` error with the endpoint's generic
-  message once the upstream request fails or times out (after 10 seconds by default), unless an older cached copy of the image exists:
+- **Uncached requests** get an image rendered from the default Steve skin,
+  cached by clients for only 60 seconds, once the upstream request fails or
+  times out (after 10 seconds by default). Players rendered in the last 24 hours
+  get their last render instead. `/download` returns a `502` with its generic
+  message instead of a stand-in skin:
   ```json
-  { "error": "Failed to render head" }
+  { "error": "Failed to download skin" }
   ```
 - The `/health` endpoint actively checks Mojang API availability and reports
   the current status. A `red` external API status indicates Mojang is

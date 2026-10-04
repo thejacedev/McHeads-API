@@ -99,12 +99,29 @@ test('invalid identifiers are a 400 and unknown players a 404', async () => {
     assert.deepEqual(JSON.parse(missing.body), { error: 'Player not found' });
 });
 
-test('upstream failures are a 502 with the endpoint message', async () => {
+test('a never-seen player gets the default skin while the upstream fails', async () => {
+    UUIDS.FirstTimer = 'bbbb2222bbbb4222bbbb2222bbbb2222';
     mojangUp = false;
     try {
-        const { response, body } = await get('/player/SomeoneElse');
+        const { response, body } = await get('/player/FirstTimer/64');
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('cache-control'), 'public, max-age=60');
+        assert.deepEqual(await dimensions(body), [64, 128]);
+    } finally {
+        mojangUp = true;
+    }
+
+    // The stand-in wasn't cached, so the real render replaces it once Mojang is back.
+    const { response } = await get('/player/FirstTimer/64');
+    assert.equal(response.headers.get('cache-control'), 'public, max-age=3600');
+});
+
+test('downloads return 502 instead of a stand-in skin when the upstream fails', async () => {
+    mojangUp = false;
+    try {
+        const { response, body } = await get('/download/SomeoneElse');
         assert.equal(response.status, 502);
-        assert.deepEqual(JSON.parse(body), { error: 'Failed to render player' });
+        assert.deepEqual(JSON.parse(body), { error: 'Failed to download skin' });
     } finally {
         mojangUp = true;
     }

@@ -233,8 +233,9 @@ Timeout for each request to Mojang, GeyserMC and the texture server.
 UPSTREAM_TIMEOUT_MS=8000
 ```
 
-A request that takes longer is abandoned. The API then serves an older cached
-copy of the image if it has one, and otherwise returns HTTP 502. Mojang's
+A request that takes longer is abandoned. The API then serves a fallback image
+(the last render, or the default skin for players it has never rendered;
+`/download` returns HTTP 502 instead). Mojang's
 session server has occasional multi-second spikes, so very low values cause
 avoidable errors. The `/health` Mojang check always uses its own 5-second
 timeout.
